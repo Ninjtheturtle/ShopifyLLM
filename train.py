@@ -6,9 +6,12 @@ from peft import get_peft_model, LoraConfig, TaskType
 import torch
 import json
 
-# Load the dataset from a local JSONL file
-with open("shopify_data.jsonl", "r") as f:
+# Load the comprehensive dataset from a local JSONL file
+print("Loading comprehensive Shopify dataset...")
+with open("comprehensive_shopify_data.jsonl", "r", encoding="utf-8") as f:
     data = [json.loads(line) for line in f]
+
+print(f"Loaded {len(data)} training examples")
 
 dataset = Dataset.from_list(data)
 
@@ -27,8 +30,8 @@ def format_prompt(example):
 
 dataset = dataset.map(format_prompt)
 
-# Load tokenizer and model
-model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+# Load tokenizer and model - using GPT-Neo for text generation
+model_id = "EleutherAI/gpt-neo-1.3B"  # Good balance of quality and speed
 tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
 
 # Add padding token if it doesn't exist
@@ -37,47 +40,57 @@ if tokenizer.pad_token is None:
 
 model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
 
-# Apply LoRA
+# Apply LoRA - optimized for GPT-Neo
 lora_config = LoraConfig(
-    r=8,
-    lora_alpha=16,
-    target_modules=["q_proj", "v_proj"],
-    lora_dropout=0.05,
+    r=8,  # Rank appropriate for 1.3B model
+    lora_alpha=16,  # Alpha value
+    target_modules=["c_attn", "c_proj"],  # GPT-Neo attention modules
+    lora_dropout=0.1,
     bias="none",
     task_type=TaskType.CAUSAL_LM
 )
 model = get_peft_model(model, lora_config)
 
-# Tokenize dataset
+# Tokenize dataset with longer max length for comprehensive examples
 def tokenize(example):
-    # Tokenize the text
+    # Tokenize the text with longer max length
     tokenized = tokenizer(
         example["text"], 
         truncation=True, 
         padding="max_length", 
-        max_length=512
+        max_length=1024  # Increased for comprehensive store scaffolds
     )
     # For causal language modeling, labels should be the same as input_ids
     tokenized["labels"] = tokenized["input_ids"].copy()
     return tokenized
 
+print("Tokenizing dataset...")
 tokenized_dataset = dataset.map(tokenize, batched=True)
 tokenized_dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
 
-# Training arguments
+print(f"Dataset ready with {len(tokenized_dataset)} examples")
+print("Starting training...")
+
+# Training arguments - optimized for 110 examples
 training_args = TrainingArguments(
-    output_dir="./results",
-    per_device_train_batch_size=2,
-    num_train_epochs=3,
+    output_dir="./shopify_llama_8b_results",
+    per_device_train_batch_size=1,  # Reduced for better memory management
+    gradient_accumulation_steps=4,  # Simulate larger batch size
+    num_train_epochs=5,  # More epochs for smaller dataset
     logging_dir="./logs",
-    logging_steps=10,
-    save_total_limit=1,
-    save_steps=50,
+    logging_steps=5,  # More frequent logging for small dataset
+    save_total_limit=2,
+    save_steps=25,  # Save more frequently
+    eval_steps=25,
     fp16=True,
-    warmup_steps=100,
-    learning_rate=5e-4,
+    warmup_steps=50,  # Reduced warmup for smaller dataset
+    learning_rate=2e-4,  # Slightly lower learning rate
+    weight_decay=0.01,
     remove_unused_columns=False,
-    dataloader_drop_last=True
+    dataloader_drop_last=False,  # Keep all data
+    report_to=None,  # Disable wandb logging
+    seed=42,
+    data_seed=42
 )
 
 # Data collator
@@ -94,6 +107,10 @@ trainer = Trainer(
 trainer.train()
 
 # Save the final model
-model.save_pretrained("./fine_tuned_model")
-tokenizer.save_pretrained("./fine_tuned_model")
+model.save_pretrained("./shopify_llama_8b_finetuned")
+tokenizer.save_pretrained("./shopify_llama_8b_finetuned")
+
+print("Training completed!")
+print("Model saved to: ./shopify_llama_8b_finetuned")
+print("You can now use this model for Shopify store generation!")
 

@@ -1,2 +1,0 @@
-{"messages": [{"role": "user", "content": "How do I add a product to my Shopify store?"}, {"role": "assistant", "content": "To add a product, go to Products > Add product. Fill in details like title, price, and inventory."}]}
-{"messages": [{"role": "user", "content": "What’s the best way to track inventory for candles?"}, {"role": "assistant", "content": "Use Shopify's inventory management and consider integrating Airtable for deeper analytics."}]}

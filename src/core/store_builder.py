@@ -5,16 +5,21 @@ import requests
 import json
 import time
 import os
-import sys
 from typing import Dict, List, Optional
 import random
 import re
+from datetime import datetime
 
-# Add the parent directory to the path to import from src
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from services.market_research import MarketResearcher
-from services.image_generator import ProductImageGenerator
+import requests
+import json
+import time
+import random
+import re
+from typing import Dict, List
+import os
 from dotenv import load_dotenv
+from market_research import MarketResearcher
+from image_generator import ProductImageGenerator
 
 # Load environment variables
 load_dotenv()
@@ -82,7 +87,7 @@ class CompleteShopifyStoreCreator:
         """Use our trained AI model to generate store concept"""
         try:
             # Import our trained model
-            from services.chat_assistant import ShopifyAssistant
+            from chat_assistant import ShopifyAssistant
             
             assistant = ShopifyAssistant()
             response = assistant.respond(prompt)
@@ -259,201 +264,180 @@ class CompleteShopifyStoreCreator:
         return concept
     
     def _extract_products_from_prompt(self, prompt: str) -> List[Dict]:
-        """Extract specific product requests directly from user prompt - GENERIC approach"""
+        """Extract specific product requests directly from user prompt - IMPROVED LIST PARSING"""
         prompt_lower = prompt.lower()
         products = []
         
-        # Extract basic product information from natural language
+        print(f"DEBUG: Starting extraction for: {prompt_lower}")
+        
+        # Enhanced product indicators including list patterns
         product_indicators = [
             'sells', 'selling', 'store that', 'store selling', 'shop that', 'shop selling',
-            'business that', 'business selling', 'want to sell', 'i want to sell', 'store for', 'shop for'
+            'business that', 'business selling', 'want to sell', 'i want to sell', 'store for', 'shop for',
+            'create a store with', 'store with', 'build a store with', 'make a store with',
+            'with a', 'with an'
         ]
         
         # Find what the user wants to sell
         product_text = ""
         for indicator in product_indicators:
             if indicator in prompt_lower:
+                print(f"DEBUG: Found indicator: {indicator}")
                 # Get text after the indicator
                 parts = prompt_lower.split(indicator, 1)
                 if len(parts) > 1:
                     product_text = parts[1].strip()
+                    print(f"DEBUG: Product text: {product_text}")
                     break
         
         if not product_text:
+            print("DEBUG: No product text found!")
             return []
         
-        # Extract product name (everything before specifications)
-        # Remove common modifiers to get base product
-        product_name = product_text
-        
-        # Remove specification words but keep the product name
-        spec_removals = [
-            'make sure', 'ensure', 'with', 'that has', 'that have', 'featuring', 
-            'in stock', 'inventory', 'pieces', 'units', 'capacity', 'oz', 'ml'
-        ]
-        
-        for removal in spec_removals:
-            if removal in product_name:
-                product_name = product_name.split(removal)[0].strip()
-        
-        # Clean up the product name - remove common store creation phrases
-        cleanup_phrases = [
-            'a store that sells', 'store that sells', 'create a store selling', 
-            'store selling', 'i want a store selling', 'build a store for',
-            'create a store for', 'make a store that sells', 'premium', 'high-quality'
-        ]
-        
-        for phrase in cleanup_phrases:
-            product_name = product_name.replace(phrase, '').strip()
-        
-        # Extract just the core product (first 1-3 meaningful words)
-        words = [w for w in product_name.split() if len(w) > 2 and w.lower() not in ['the', 'and', 'for', 'with', 'premium', 'high-quality', '30oz', 'oz', 'ml', 'eco-friendly', 'organic']]
-        if words:
-            # Take first 1-2 words as the core product, check for common combinations
-            if len(words) >= 2:
-                two_word = ' '.join(words[:2]).lower()
-                if any(combo in two_word for combo in ['water bottle', 'water bottles', 'speed cube', 'speed cubes', 'yoga mat', 'yoga mats', 'coffee bean', 'coffee beans', 'toilet paper', 'wireless headphone', 'wireless headphones']):
-                    # Use singular form
-                    result = ' '.join(words[:2])
-                    if result.lower().endswith('s') and not result.lower().endswith('ss'):
-                        result = result[:-1]  # Remove plural 's'
-                    product_name = result
-                else:
-                    # Check if we should combine words for common products
-                    if words[0].lower() in ['toilet', 'wireless', 'speed', 'yoga', 'coffee'] and len(words) >= 2:
-                        product_name = ' '.join(words[:2])
-                        if product_name.lower().endswith('s') and not product_name.lower().endswith('ss'):
-                            product_name = product_name[:-1]
-                    else:
-                        # Just take the first word and make it singular if plural
-                        product_name = words[0]
-                        if product_name.lower().endswith('s') and not product_name.lower().endswith('ss'):
-                            product_name = product_name[:-1]
+        try:
+            # Parse lists - look for comma-separated items or "and" lists
+            product_items = []
+            
+            # Handle comma-separated lists: "vanilla candle, lavender candle, and cherry candle"
+            if ',' in product_text:
+                print("DEBUG: Found commas, parsing list...")
+                # Split by comma and clean up
+                items = [item.strip() for item in product_text.split(',')]
+                
+                # Handle "and" in the last item
+                last_item = items[-1]
+                if ' and ' in last_item:
+                    and_parts = last_item.split(' and ')
+                    items[-1] = and_parts[0].strip()
+                    for part in and_parts[1:]:
+                        if part.strip():
+                            items.append(part.strip())
+                
+                product_items = [item for item in items if item.strip()]
+            
+            # Handle simple "and" lists: "vanilla and lavender candles"
+            elif ' and ' in product_text:
+                and_parts = product_text.split(' and ')
+                product_items = [part.strip() for part in and_parts if part.strip()]
+            
+            # Single product
             else:
-                product_name = words[0]
-                if product_name.lower().endswith('s') and not product_name.lower().endswith('ss'):
-                    product_name = product_name[:-1]
-        
-        # Handle special cases where we need to capture the organic/eco descriptors properly
-        original_words = product_text.split()
-        if 'organic' in prompt_lower and product_name.lower() != 'organic':
-            # Find what comes after organic
-            for i, word in enumerate(original_words):
-                if word.lower() == 'organic' and i + 1 < len(original_words):
-                    next_word = original_words[i + 1]
-                    if len(next_word) > 2 and next_word.lower() not in ['and', 'the', 'a']:
-                        if next_word.lower().endswith('s') and not next_word.lower().endswith('ss'):
-                            next_word = next_word[:-1]
-                        product_name = next_word
-                        material = 'organic'
-                        break
-        elif 'eco-friendly' in prompt_lower:
-            # Find what comes after eco-friendly
-            eco_index = prompt_lower.find('eco-friendly')
-            after_eco = prompt_lower[eco_index + len('eco-friendly'):].strip()
-            eco_words = [w for w in after_eco.split() if len(w) > 2 and w not in ['and', 'the', 'a']]
-            if eco_words:
-                if len(eco_words) >= 2 and any(combo in ' '.join(eco_words[:2]) for combo in ['yoga mat', 'yoga mats']):
-                    product_name = ' '.join(eco_words[:2])
-                    if product_name.endswith('s') and not product_name.endswith('ss'):
-                        product_name = product_name[:-1]
+                product_items = [product_text.strip()]
+            
+            # Clean up items - remove leading "and" or articles
+            cleaned_items = []
+            for item in product_items:
+                item = item.strip()
+                if item.lower().startswith('and '):
+                    item = item[4:].strip()  # Remove 'and '
+                # Remove articles
+                item = re.sub(r'^(a|an|the)\s+', '', item)
+                if item:
+                    cleaned_items.append(item)
+            
+            product_items = cleaned_items
+            print(f"DEBUG: Cleaned items: {product_items}")
+            
+            # Process each product item
+            for item in product_items:
+                print(f"DEBUG: Processing item: {item}")
+                if not item or len(item) < 3:
+                    continue
+                    
+                # Clean up the item text
+                item = item.strip()
+                
+                # Stop at common ending words that aren't part of the product name
+                stop_words = ['make', 'with', 'that', 'stock', 'inventory', 'for', 'in']
+                for stop in stop_words:
+                    if ' ' + stop in item:
+                        item = item.split(' ' + stop)[0].strip()
+                
+                # Extract product name (first 1-3 meaningful words)
+                words = [w for w in item.split() if len(w) > 1 and w.lower() not in ['the', 'and', 'for', 'with']]
+                if not words:
+                    continue
+                
+                # Determine product name
+                if len(words) >= 2:
+                    # Check for common compound products
+                    two_word = ' '.join(words[:2]).lower()
+                    if any(combo in two_word for combo in ['vanilla candle', 'lavender candle', 'cherry candle', 
+                                                           'soy candle', 'scented candle', 'aromatherapy candle',
+                                                           'water bottle', 'coffee bean', 'yoga mat', 'speed cube']):
+                        product_name = ' '.join(words[:2])
+                    else:
+                        product_name = words[0]
                 else:
-                    product_name = eco_words[0]
-                    if product_name.endswith('s') and not product_name.endswith('ss'):
-                        product_name = product_name[:-1]
-        
-        product_name = product_name.strip()
-        
-        if not product_name or len(product_name) < 3:
+                    product_name = words[0]
+                
+                print(f"DEBUG: Final product name: {product_name}")
+                
+                # Extract specifications from the original item
+                inventory = 50  # default
+                color = None
+                size = None
+                material = None
+                
+                # Look for inventory specifications in the full prompt
+                inventory_patterns = [
+                    r'(\d+)\s*in\s*stock',
+                    r'stock\s*of\s*(\d+)',
+                    r'(\d+)\s*inventory',
+                    r'theres?\s*(\d+)',
+                    r'make\s*sure\s*theres?\s*(\d+)',
+                    r'(\d+)\s*pieces',
+                    r'(\d+)\s*units',
+                    r'stock\s*(\d+)'
+                ]
+                for pattern in inventory_patterns:
+                    inventory_match = re.search(pattern, prompt_lower)
+                    if inventory_match:
+                        inventory = int(inventory_match.group(1))
+                        break
+                
+                # Extract color from the item name itself
+                color_words = ['vanilla', 'lavender', 'cherry', 'red', 'blue', 'green', 'black', 'white', 
+                              'silver', 'gold', 'yellow', 'purple', 'orange', 'pink', 'grey', 'gray', 'brown']
+                for c in color_words:
+                    if c in item.lower():
+                        color = c
+                        break
+                
+                # Build the final product name
+                final_name = product_name.title()
+                
+                # Generate product-specific description
+                description = self._generate_product_specific_description(product_name, material, color, size)
+                
+                # Generate SKU
+                sku_base = ''.join([c.upper() for c in product_name.replace(' ', '') if c.isalpha()])[:6]
+                if color:
+                    sku_base += color.upper()[:3]
+                sku = sku_base[:12] or f"PROD{random.randint(1000, 9999)}"
+                
+                # Base price (will be enhanced by market research)
+                base_price = random.uniform(15.99, 49.99)
+                
+                product = {
+                    'name': final_name,
+                    'price': round(base_price, 2),
+                    'description': description,
+                    'inventory': inventory,
+                    'sku': sku
+                }
+                
+                print(f"DEBUG: Created product: {product}")
+                products.append(product)
+            
+            print(f"DEBUG: Total products created: {len(products)}")
+            return products
+            
+        except Exception as e:
+            print(f"DEBUG: Exception in extraction: {e}")
+            import traceback
+            traceback.print_exc()
             return []
-        
-        # Extract specifications from the full prompt
-        inventory = 50  # default
-        color = None
-        size = None
-        material = None
-        
-        # Parse inventory requirements
-        inventory_patterns = [
-            r'(\d+)\s*in\s*stock',
-            r'stock\s*of\s*(\d+)',
-            r'(\d+)\s*inventory',
-            r'theres?\s*(\d+)',
-            r'make\s*sure\s*theres?\s*(\d+)',
-            r'(\d+)\s*pieces',
-            r'(\d+)\s*units'
-        ]
-        for pattern in inventory_patterns:
-            inventory_match = re.search(pattern, prompt_lower)
-            if inventory_match:
-                inventory = int(inventory_match.group(1))
-                break
-        
-        # Parse color specifications
-        color_words = ['red', 'blue', 'green', 'black', 'white', 'silver', 'gold', 'yellow', 'purple', 'orange', 'pink', 'grey', 'gray', 'brown', 'clear', 'transparent']
-        for c in color_words:
-            if c in prompt_lower:
-                color = c
-                break
-        
-        # Parse size specifications (generic)
-        size_patterns = [
-            r'(\d+)\s*oz',
-            r'(\d+)\s*ml', 
-            r'(\d+)\s*inch',
-            r'(\d+)\s*cm',
-            r'(\d+)\s*ft',
-            r'(\d+)\s*meter',
-            r'size\s*(\w+)',
-            r'(\w+)\s*size'
-        ]
-        for pattern in size_patterns:
-            size_match = re.search(pattern, prompt_lower)
-            if size_match:
-                size = size_match.group(1)
-                break
-        
-        # Parse material specifications
-        materials = ['steel', 'stainless steel', 'plastic', 'wood', 'metal', 'glass', 'ceramic', 'cotton', 'polyester', 'leather', 'rubber', 'silicon', 'bamboo', 'organic']
-        for m in materials:
-            if m in prompt_lower:
-                material = m
-                break
-        
-        # Build the product name with specifications
-        final_name = product_name.title()
-        if size and color:
-            final_name = f"{size}oz {color.title()} {product_name.title()}"
-        elif size:
-            final_name = f"{size}oz {product_name.title()}"
-        elif color:
-            final_name = f"{color.title()} {product_name.title()}"
-        elif material:
-            final_name = f"{material.title()} {product_name.title()}"
-        
-        # Generate product-specific description
-        description = self._generate_product_specific_description(product_name, material, color, size)
-        
-        # Generate SKU
-        sku = ''.join([c.upper() for c in product_name if c.isalpha()])[:6]
-        if size:
-            sku += size.upper()
-        if color:
-            sku += color.upper()[:3]
-        sku = sku[:12] or f"PROD{random.randint(1000, 9999)}"
-        
-        # Base price (will be enhanced by market research)
-        base_price = random.uniform(15.99, 49.99)
-        
-        products.append({
-            'name': final_name,
-            'price': round(base_price, 2),
-            'description': description,
-            'inventory': inventory,
-            'sku': sku
-        })
-        
-        return products
     
     def _generate_fallback_products_for_prompt(self, prompt: str) -> List[Dict]:
         """Generate appropriate fallback products based on the prompt - GENERIC approach"""
@@ -1303,6 +1287,234 @@ class CompleteShopifyStoreCreator:
                 print(f"   ❌ API error adding product to collection: {e}")
             
             time.sleep(0.2)  # Rate limiting
+    
+    def _get_all_products(self) -> List[Dict]:
+        """Get all products from the Shopify store"""
+        try:
+            if not self.real_mode or not self.access_token:
+                # Return demo products if not in real mode
+                return [
+                    {
+                        'id': 1,
+                        'title': 'Demo Product 1',
+                        'handle': 'demo-product-1',
+                        'body_html': '<p>This is a demo product description.</p>',
+                        'vendor': 'Demo Store',
+                        'product_type': 'Demo',
+                        'created_at': '2024-01-01T00:00:00Z',
+                        'updated_at': '2024-01-01T00:00:00Z',
+                        'published_at': '2024-01-01T00:00:00Z',
+                        'template_suffix': None,
+                        'published_scope': 'web',
+                        'tags': 'demo, product',
+                        'status': 'active',
+                        'admin_graphql_api_id': 'gid://shopify/Product/1',
+                        'variants': [
+                            {
+                                'id': 1,
+                                'product_id': 1,
+                                'title': 'Default Title',
+                                'price': '29.99',
+                                'sku': 'DEMO-001',
+                                'position': 1,
+                                'inventory_policy': 'deny',
+                                'compare_at_price': None,
+                                'fulfillment_service': 'manual',
+                                'inventory_management': 'shopify',
+                                'option1': 'Default Title',
+                                'option2': None,
+                                'option3': None,
+                                'created_at': '2024-01-01T00:00:00Z',
+                                'updated_at': '2024-01-01T00:00:00Z',
+                                'taxable': True,
+                                'barcode': None,
+                                'grams': 500,
+                                'weight': 0.5,
+                                'weight_unit': 'kg',
+                                'inventory_item_id': 1,
+                                'inventory_quantity': 100,
+                                'old_inventory_quantity': 100,
+                                'requires_shipping': True,
+                                'admin_graphql_api_id': 'gid://shopify/ProductVariant/1'
+                            }
+                        ],
+                        'options': [
+                            {
+                                'id': 1,
+                                'product_id': 1,
+                                'name': 'Title',
+                                'position': 1,
+                                'values': ['Default Title']
+                            }
+                        ],
+                        'images': [],
+                        'image': None
+                    }
+                ]
+            
+            # Make API call to get all products
+            response = requests.get(
+                f"{self.api_base}/products.json?limit=250",
+                headers=self.headers
+            )
+            
+            if response.status_code == 200:
+                products_data = response.json()
+                products = products_data.get('products', [])
+                
+                # Handle pagination if there are more products
+                while 'next' in response.links:
+                    next_url = response.links['next']['url']
+                    response = requests.get(next_url, headers=self.headers)
+                    if response.status_code == 200:
+                        more_products = response.json().get('products', [])
+                        products.extend(more_products)
+                    else:
+                        break
+                
+                return products
+            else:
+                print(f"Failed to fetch products: {response.status_code}")
+                print(f"Error: {response.text}")
+                return []
+                
+        except Exception as e:
+            print(f"Error fetching products: {e}")
+            return []
+    
+    def _get_product(self, product_id: str) -> Dict:
+        """Get a specific product by ID"""
+        try:
+            if not self.real_mode or not self.access_token:
+                # Return demo product if not in real mode
+                return {
+                    'id': int(product_id),
+                    'title': f'Demo Product {product_id}',
+                    'handle': f'demo-product-{product_id}',
+                    'body_html': '<p>This is a demo product description.</p>',
+                    'vendor': 'Demo Store',
+                    'product_type': 'Demo',
+                    'created_at': '2024-01-01T00:00:00Z',
+                    'updated_at': '2024-01-01T00:00:00Z',
+                    'published_at': '2024-01-01T00:00:00Z',
+                    'template_suffix': None,
+                    'published_scope': 'web',
+                    'tags': 'demo, product',
+                    'status': 'active',
+                    'admin_graphql_api_id': f'gid://shopify/Product/{product_id}',
+                    'variants': [
+                        {
+                            'id': int(product_id) * 10,
+                            'product_id': int(product_id),
+                            'title': 'Default Title',
+                            'price': '29.99',
+                            'sku': f'DEMO-{product_id:03d}',
+                            'position': 1,
+                            'inventory_policy': 'deny',
+                            'compare_at_price': None,
+                            'fulfillment_service': 'manual',
+                            'inventory_management': 'shopify',
+                            'option1': 'Default Title',
+                            'option2': None,
+                            'option3': None,
+                            'created_at': '2024-01-01T00:00:00Z',
+                            'updated_at': '2024-01-01T00:00:00Z',
+                            'taxable': True,
+                            'barcode': None,
+                            'grams': 500,
+                            'weight': 0.5,
+                            'weight_unit': 'kg',
+                            'inventory_item_id': int(product_id) * 10,
+                            'inventory_quantity': 100,
+                            'old_inventory_quantity': 100,
+                            'requires_shipping': True,
+                            'admin_graphql_api_id': f'gid://shopify/ProductVariant/{int(product_id) * 10}'
+                        }
+                    ],
+                    'options': [
+                        {
+                            'id': int(product_id),
+                            'product_id': int(product_id),
+                            'name': 'Title',
+                            'position': 1,
+                            'values': ['Default Title']
+                        }
+                    ],
+                    'images': [],
+                    'image': None
+                }
+            
+            # Make API call to get specific product
+            response = requests.get(
+                f"{self.api_base}/products/{product_id}.json",
+                headers=self.headers
+            )
+            
+            if response.status_code == 200:
+                product_data = response.json()
+                return product_data.get('product', {})
+            else:
+                print(f"Failed to fetch product {product_id}: {response.status_code}")
+                print(f"Error: {response.text}")
+                return {}
+                
+        except Exception as e:
+            print(f"Error fetching product {product_id}: {e}")
+            return {}
+    
+    def _update_product(self, product_id: str, product_data: Dict) -> Dict:
+        """Update a specific product"""
+        try:
+            if not self.real_mode or not self.access_token:
+                # Return demo updated product if not in real mode
+                demo_product = self._get_product(product_id)
+                
+                # Update demo product with provided data
+                if 'title' in product_data:
+                    demo_product['title'] = product_data['title']
+                if 'body_html' in product_data:
+                    demo_product['body_html'] = product_data['body_html']
+                if 'tags' in product_data:
+                    demo_product['tags'] = product_data['tags']
+                if 'product_type' in product_data:
+                    demo_product['product_type'] = product_data['product_type']
+                if 'vendor' in product_data:
+                    demo_product['vendor'] = product_data['vendor']
+                
+                # Update variant data if provided
+                if 'variants' in product_data and product_data['variants']:
+                    variant_data = product_data['variants'][0]
+                    if 'price' in variant_data:
+                        demo_product['variants'][0]['price'] = str(variant_data['price'])
+                    if 'inventory_quantity' in variant_data:
+                        demo_product['variants'][0]['inventory_quantity'] = variant_data['inventory_quantity']
+                    if 'sku' in variant_data:
+                        demo_product['variants'][0]['sku'] = variant_data['sku']
+                
+                demo_product['updated_at'] = datetime.now().isoformat() + 'Z'
+                return demo_product
+            
+            # Prepare data for Shopify API
+            update_data = {"product": product_data}
+            
+            # Make API call to update product
+            response = requests.put(
+                f"{self.api_base}/products/{product_id}.json",
+                headers=self.headers,
+                json=update_data
+            )
+            
+            if response.status_code == 200:
+                updated_product = response.json()
+                return updated_product.get('product', {})
+            else:
+                print(f"Failed to update product {product_id}: {response.status_code}")
+                print(f"Error: {response.text}")
+                return {}
+                
+        except Exception as e:
+            print(f"Error updating product {product_id}: {e}")
+            return {}
     
     def _create_blog_posts(self, blog_titles: List[str]):
         """Create blog posts"""

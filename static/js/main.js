@@ -5,6 +5,8 @@ class StoreCreator {
         this.checkConnection();
         this.loadRecentStores();
         this.initSettings();
+        this.initProductManagement();
+        this.currentEditJob = null;
     }
 
     init() {
@@ -559,7 +561,335 @@ function useExample(prompt) {
     document.getElementById('storeCreationForm').scrollIntoView({ behavior: 'smooth' });
 }
 
+// Product Management Functionality
+StoreCreator.prototype.initProductManagement = function() {
+    // Get product management elements
+    this.loadProductsBtn = document.getElementById('loadProductsBtn');
+    this.productsContainer = document.getElementById('productsContainer');
+    this.productsGrid = document.getElementById('productsGrid');
+    this.productEditor = document.getElementById('productEditor');
+    this.productEditForm = document.getElementById('productEditForm');
+    this.editProgress = document.getElementById('editProgress');
+    this.closeEditorBtn = document.getElementById('closeEditorBtn');
+    this.cancelEditBtn = document.getElementById('cancelEditBtn');
+
+    // Bind product management events
+    this.loadProductsBtn.addEventListener('click', () => this.loadProducts());
+    this.productEditForm.addEventListener('submit', (e) => this.handleProductEdit(e));
+    this.closeEditorBtn.addEventListener('click', () => this.closeProductEditor());
+    this.cancelEditBtn.addEventListener('click', () => this.closeProductEditor());
+};
+
+StoreCreator.prototype.loadProducts = async function() {
+    try {
+        this.loadProductsBtn.disabled = true;
+        this.loadProductsBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Loading...';
+        
+        // Show loading state
+        this.productsGrid.innerHTML = `
+            <div class="loading-products">
+                <i class="fas fa-sync-alt fa-spin"></i>
+                <p>Loading your products...</p>
+            </div>
+        `;
+        this.productsContainer.style.display = 'block';
+
+        const response = await fetch('/api/products');
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load products');
+        }
+
+        this.displayProducts(data.products);
+        this.showToast(`Loaded ${data.count} products`, 'success');
+
+    } catch (error) {
+        console.error('Error loading products:', error);
+        this.showToast('Failed to load products: ' + error.message, 'error');
+        this.productsGrid.innerHTML = `
+            <div class="no-products">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Failed to load products</p>
+                <p style="font-size: 0.875rem; margin-top: 0.5rem;">${error.message}</p>
+            </div>
+        `;
+    } finally {
+        this.loadProductsBtn.disabled = false;
+        this.loadProductsBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Load Products';
+    }
+};
+
+StoreCreator.prototype.displayProducts = function(products) {
+    if (!products || products.length === 0) {
+        this.productsGrid.innerHTML = `
+            <div class="no-products">
+                <i class="fas fa-box-open"></i>
+                <p>No products found</p>
+                <p style="font-size: 0.875rem; margin-top: 0.5rem;">Create your first store to see products here</p>
+            </div>
+        `;
+        return;
+    }
+
+    this.productsGrid.innerHTML = products.map(product => {
+        const price = product.variants && product.variants[0] ? 
+            `$${parseFloat(product.variants[0].price).toFixed(2)}` : 'No price';
+        
+        const imageUrl = product.images && product.images[0] ? 
+            product.images[0].src : '/static/images/no-image.png';
+        
+        const description = this.stripHtml(product.body_html || 'No description available');
+        
+        return `
+            <div class="product-card" data-product-id="${product.id}">
+                <div class="product-card-header">
+                    <h3 class="product-title">${this.escapeHtml(product.title)}</h3>
+                    <span class="product-price">${price}</span>
+                </div>
+                
+                <img src="${imageUrl}" alt="${this.escapeHtml(product.title)}" class="product-image" 
+                     onerror="this.src='/static/images/no-image.png'">
+                
+                <p class="product-description">${this.escapeHtml(description.substring(0, 150))}...</p>
+                
+                <div class="product-meta">
+                    <span><i class="fas fa-tag"></i> ID: ${product.id}</span>
+                    <span><i class="fas fa-calendar"></i> ${new Date(product.created_at).toLocaleDateString()}</span>
+                </div>
+                
+                <div class="product-actions">
+                    <button class="edit-product-btn" onclick="storeCreator.editProduct('${product.id}')">
+                        <i class="fas fa-edit"></i>
+                        Edit Product
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+StoreCreator.prototype.editProduct = async function(productId) {
+    try {
+        // Load product details
+        const response = await fetch(`/api/products/${productId}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load product');
+        }
+
+        this.showProductEditor(data.product);
+
+    } catch (error) {
+        console.error('Error loading product for editing:', error);
+        this.showToast('Failed to load product: ' + error.message, 'error');
+    }
+};
+
+StoreCreator.prototype.showProductEditor = function(product) {
+    const price = product.variants && product.variants[0] ? 
+        `$${parseFloat(product.variants[0].price).toFixed(2)}` : 'No price';
+    
+    const imageUrl = product.images && product.images[0] ? 
+        product.images[0].src : '/static/images/no-image.png';
+
+    // Store current product for editing
+    this.currentProduct = product;
+
+    // Populate current product display
+    document.getElementById('currentProduct').innerHTML = `
+        <div class="current-product-title">
+            <i class="fas fa-box"></i>
+            ${this.escapeHtml(product.title)}
+        </div>
+        <div class="current-product-details">
+            <div class="current-product-detail">
+                <i class="fas fa-dollar-sign"></i>
+                <span>Price: ${price}</span>
+            </div>
+            <div class="current-product-detail">
+                <i class="fas fa-tag"></i>
+                <span>ID: ${product.id}</span>
+            </div>
+            <div class="current-product-detail">
+                <i class="fas fa-calendar"></i>
+                <span>Created: ${new Date(product.created_at).toLocaleDateString()}</span>
+            </div>
+            <div class="current-product-detail">
+                <i class="fas fa-eye"></i>
+                <span>Published: ${product.published ? 'Yes' : 'No'}</span>
+            </div>
+        </div>
+        <img src="${imageUrl}" alt="${this.escapeHtml(product.title)}" class="product-image" 
+             onerror="this.src='/static/images/no-image.png'" style="margin-top: 1rem;">
+    `;
+
+    // Clear edit form
+    document.getElementById('editPrompt').value = '';
+
+    // Show editor
+    this.productEditor.style.display = 'block';
+    this.productEditor.scrollIntoView({ behavior: 'smooth' });
+};
+
+StoreCreator.prototype.closeProductEditor = function() {
+    this.productEditor.style.display = 'none';
+    this.currentProduct = null;
+    
+    // Hide progress if showing
+    this.editProgress.style.display = 'none';
+    
+    // Stop monitoring if active
+    if (this.currentEditJob) {
+        clearInterval(this.currentEditJob);
+        this.currentEditJob = null;
+    }
+};
+
+StoreCreator.prototype.handleProductEdit = async function(e) {
+    e.preventDefault();
+
+    if (!this.currentProduct) {
+        this.showToast('No product selected for editing', 'error');
+        return;
+    }
+
+    const formData = new FormData(e.target);
+    const prompt = formData.get('prompt').trim();
+
+    if (!prompt) {
+        this.showToast('Please describe what you want to change', 'error');
+        return;
+    }
+
+    try {
+        // Disable form
+        const editBtn = document.getElementById('editProductBtn');
+        editBtn.disabled = true;
+        editBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Starting...';
+
+        // Start edit job
+        const response = await fetch('/api/edit-product', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                product_id: this.currentProduct.id,
+                prompt: prompt
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to start product editing');
+        }
+
+        // Start monitoring edit progress
+        this.startEditProgressMonitoring(data.job_id);
+        this.showToast('Product editing started!', 'info');
+
+    } catch (error) {
+        console.error('Error starting product edit:', error);
+        this.showToast('Failed to start editing: ' + error.message, 'error');
+        
+        // Re-enable form
+        const editBtn = document.getElementById('editProductBtn');
+        editBtn.disabled = false;
+        editBtn.innerHTML = '<i class="fas fa-save"></i> Update Product';
+    }
+};
+
+StoreCreator.prototype.startEditProgressMonitoring = function(jobId) {
+    this.editProgress.style.display = 'block';
+    
+    const progressFill = document.getElementById('editProgressFill');
+    const progressText = document.getElementById('editProgressText');
+    
+    // Initial state
+    progressFill.style.width = '0%';
+    progressText.textContent = 'Starting product update...';
+
+    this.currentEditJob = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/job-status/${jobId}`);
+            const status = await response.json();
+
+            if (!response.ok) {
+                throw new Error('Failed to get job status');
+            }
+
+            // Update progress
+            progressFill.style.width = `${status.progress}%`;
+            progressText.textContent = this.getEditProgressText(status.progress);
+
+            if (status.status === 'completed') {
+                clearInterval(this.currentEditJob);
+                this.currentEditJob = null;
+                
+                progressFill.style.width = '100%';
+                progressText.textContent = 'Product updated successfully!';
+                
+                this.showToast('Product updated successfully!', 'success');
+                
+                // Hide progress and editor after a delay
+                setTimeout(() => {
+                    this.editProgress.style.display = 'none';
+                    this.closeProductEditor();
+                    
+                    // Reload products to show changes
+                    this.loadProducts();
+                }, 2000);
+                
+            } else if (status.status === 'failed') {
+                clearInterval(this.currentEditJob);
+                this.currentEditJob = null;
+                
+                progressText.textContent = 'Edit failed: ' + (status.error || 'Unknown error');
+                this.showToast('Product edit failed: ' + (status.error || 'Unknown error'), 'error');
+                
+                // Re-enable form
+                const editBtn = document.getElementById('editProductBtn');
+                editBtn.disabled = false;
+                editBtn.innerHTML = '<i class="fas fa-save"></i> Update Product';
+            }
+
+        } catch (error) {
+            console.error('Error checking edit status:', error);
+            clearInterval(this.currentEditJob);
+            this.currentEditJob = null;
+            
+            progressText.textContent = 'Error checking progress';
+            this.showToast('Error monitoring progress', 'error');
+        }
+    }, 2000);
+};
+
+StoreCreator.prototype.getEditProgressText = function(progress) {
+    if (progress < 20) return 'Analyzing product changes...';
+    if (progress < 40) return 'Loading current product data...';
+    if (progress < 60) return 'Applying updates...';
+    if (progress < 80) return 'Updating product in Shopify...';
+    if (progress < 100) return 'Generating new images...';
+    return 'Finalizing changes...';
+};
+
+// Utility functions for product management
+StoreCreator.prototype.stripHtml = function(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+};
+
+StoreCreator.prototype.escapeHtml = function(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+};
+
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    new StoreCreator();
+    window.storeCreator = new StoreCreator();
 });

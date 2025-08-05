@@ -268,6 +268,170 @@ def update_store_theme():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/products', methods=['GET'])
+def list_products():
+    """Get list of all products from Shopify store"""
+    try:
+        # Initialize store creator to access Shopify API
+        creator = CompleteShopifyStoreCreator()
+        
+        if not creator.real_mode or not creator.access_token:
+            return jsonify({'error': 'Shopify credentials not configured'}), 400
+        
+        # Fetch products from Shopify
+        products = creator._get_all_products()
+        
+        return jsonify({
+            'success': True,
+            'products': products,
+            'count': len(products)
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products/<product_id>', methods=['GET'])
+def get_product(product_id):
+    """Get details of a specific product"""
+    try:
+        creator = CompleteShopifyStoreCreator()
+        
+        if not creator.real_mode or not creator.access_token:
+            return jsonify({'error': 'Shopify credentials not configured'}), 400
+        
+        product = creator._get_product(product_id)
+        
+        if not product:
+            return jsonify({'error': 'Product not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'product': product
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products/<product_id>', methods=['PUT'])
+def update_product(product_id):
+    """Update a specific product"""
+    try:
+        data = request.get_json()
+        
+        creator = CompleteShopifyStoreCreator()
+        
+        if not creator.real_mode or not creator.access_token:
+            return jsonify({'error': 'Shopify credentials not configured'}), 400
+        
+        # Update product via Shopify API
+        updated_product = creator._update_product(product_id, data)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Product updated successfully',
+            'product': updated_product
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/edit-product', methods=['POST'])
+def edit_product_with_ai():
+    """Edit a product using AI-powered prompt"""
+    try:
+        data = request.get_json()
+        product_id = data.get('product_id')
+        prompt = data.get('prompt', '').strip()
+        
+        if not product_id or not prompt:
+            return jsonify({'error': 'Product ID and prompt are required'}), 400
+        
+        # Generate unique job ID for editing
+        job_id = str(uuid.uuid4())
+        
+        # Create job for tracking
+        job = StoreCreationJob(job_id, f"Edit Product {product_id}: {prompt}")
+        creation_jobs[job_id] = job
+        
+        # Start editing in background thread
+        thread = threading.Thread(
+            target=edit_product_worker,
+            args=(job_id, product_id, prompt)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'message': 'Product editing started'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def edit_product_worker(job_id: str, product_id: str, prompt: str):
+    """Background worker for editing products with AI"""
+    job = creation_jobs.get(job_id)
+    if not job:
+        return
+    
+    try:
+        job.status = 'running'
+        job.progress = 10
+        
+        # Initialize store creator
+        creator = CompleteShopifyStoreCreator()
+        
+        if not creator.real_mode or not creator.access_token:
+            job.status = 'failed'
+            job.error = 'Shopify credentials not configured'
+            return
+        
+        job.progress = 20
+        
+        # Get current product
+        current_product = creator._get_product(product_id)
+        if not current_product:
+            job.status = 'failed'
+            job.error = 'Product not found'
+            return
+        
+        job.progress = 30
+        
+        # Parse editing instructions from prompt
+        updates = creator._parse_product_edit_prompt(prompt, current_product)
+        
+        job.progress = 50
+        
+        # Apply updates
+        updated_product = creator._update_product(product_id, updates)
+        
+        job.progress = 80
+        
+        # Generate new image if needed
+        if updates.get('generate_new_image'):
+            image_url = creator._generate_and_upload_product_image(
+                updated_product.get('title', ''), 
+                product_id
+            )
+            if image_url:
+                creator._update_product_image(product_id, image_url)
+        
+        job.progress = 100
+        job.status = 'completed'
+        job.result = {
+            'product_id': product_id,
+            'updated_product': updated_product,
+            'message': 'Product updated successfully'
+        }
+        job.completed_at = datetime.now()
+        
+    except Exception as e:
+        job.status = 'failed'
+        job.error = str(e)
+        job.completed_at = datetime.now()
+
 if __name__ == '__main__':
     # Ensure templates and static directories exist
     os.makedirs('templates', exist_ok=True)

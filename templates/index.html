@@ -86,6 +86,82 @@
                 </div>
             </section>
 
+            <!-- Product Management Section -->
+            <section class="product-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-boxes"></i> Manage Products</h2>
+                    <p>View and edit your existing products</p>
+                    <button class="load-products-btn" id="loadProductsBtn">
+                        <i class="fas fa-sync-alt"></i>
+                        Load Products
+                    </button>
+                </div>
+
+                <!-- Products List -->
+                <div class="products-container" id="productsContainer" style="display: none;">
+                    <div class="products-grid" id="productsGrid">
+                        <!-- Products will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Product Editor -->
+                <div class="product-editor" id="productEditor" style="display: none;">
+                    <div class="editor-header">
+                        <h3><i class="fas fa-edit"></i> Edit Product</h3>
+                        <button class="close-editor-btn" id="closeEditorBtn">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="editor-content">
+                        <div class="current-product" id="currentProduct">
+                            <!-- Current product details will be shown here -->
+                        </div>
+                        
+                        <form id="productEditForm" class="edit-form">
+                            <div class="form-group">
+                                <label for="editPrompt">
+                                    <i class="fas fa-magic"></i>
+                                    How would you like to edit this product?
+                                </label>
+                                <textarea 
+                                    id="editPrompt" 
+                                    name="prompt" 
+                                    placeholder="e.g., Make this a black water bottle with 20oz capacity and update the image"
+                                    rows="3"
+                                    required
+                                ></textarea>
+                                <div class="form-hint">
+                                    Describe what you want to change: color, size, title, price, description, etc.
+                                </div>
+                            </div>
+
+                            <div class="edit-actions">
+                                <button type="submit" class="edit-btn" id="editProductBtn">
+                                    <i class="fas fa-save"></i>
+                                    Update Product
+                                </button>
+                                <button type="button" class="cancel-btn" id="cancelEditBtn">
+                                    <i class="fas fa-ban"></i>
+                                    Cancel
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Edit Progress -->
+                <div class="edit-progress" id="editProgress" style="display: none;">
+                    <div class="progress-card">
+                        <h3><i class="fas fa-cog fa-spin"></i> Updating Product</h3>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="editProgressFill"></div>
+                        </div>
+                        <div class="progress-text" id="editProgressText">Analyzing changes...</div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Progress Section -->
             <section class="progress-section" id="progressSection" style="display: none;">
                 <div class="progress-card">

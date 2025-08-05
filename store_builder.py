@@ -17,6 +17,8 @@ import re
 from typing import Dict, List
 import os
 from dotenv import load_dotenv
+from market_research import MarketResearcher
+from image_generator import ProductImageGenerator
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +40,12 @@ class CompleteShopifyStoreCreator:
         # Check if we should use real mode from environment
         env_mode = os.getenv('STORE_CREATION_MODE', 'demo').lower()
         self.real_mode = real_mode or (env_mode == 'real')
+        
+        # Initialize market researcher for enhanced product data
+        self.researcher = MarketResearcher()
+        
+        # Initialize image generator for product images
+        self.image_generator = ProductImageGenerator()
         
         # Set up API configuration
         if self.shop_domain and self.access_token:
@@ -86,7 +94,7 @@ class CompleteShopifyStoreCreator:
             print(f"🤖 AI Response: {response[:200]}...")
             
             # Parse the AI response
-            concept = self._parse_ai_response(response)
+            concept = self._parse_ai_response(response, prompt)
             
             print(f"✅ AI generated: {concept['store_name']}")
             print(f"   Tagline: {concept['tagline']}")
@@ -98,7 +106,7 @@ class CompleteShopifyStoreCreator:
             print(f"⚠️ AI generation failed, using fallback: {e}")
             return self._create_fallback_concept(prompt)
     
-    def _parse_ai_response(self, response: str) -> Dict:
+    def _parse_ai_response(self, response: str, prompt: str) -> Dict:
         """Parse AI response into structured store data"""
         lines = response.split('\n')
         
@@ -112,7 +120,18 @@ class CompleteShopifyStoreCreator:
             'color_scheme': self._get_random_color_scheme()
         }
         
+        # FIRST: Check if the prompt has specific product requests that the AI didn't parse
+        prompt_products = self._extract_products_from_prompt(prompt)
+        if prompt_products:
+            concept['products'] = prompt_products
+            print(f"   ✅ Extracted {len(prompt_products)} products directly from your request")
+            for p in prompt_products:
+                print(f"   - {p['name']}: ${p['price']}")
+            return concept
+        
+        # SECOND: Try to parse from AI response
         current_product = {}
+        product_names_seen = set()  # Track product names to avoid duplicates
         
         for line in lines:
             line = line.strip()
@@ -131,14 +150,33 @@ class CompleteShopifyStoreCreator:
                 if tagline and len(tagline) > 2:
                     concept['tagline'] = tagline
             
-            # Extract products (numbered list) - look for "1." "2." etc.
+            # Extract products (numbered list) - but filter out non-products
             elif re.match(r'^\d+\.', line):
                 if current_product and current_product.get('name'):
                     concept['products'].append(current_product)
                 
                 # Parse: "1. Product Name ($XX.XX) - description"
-                # Remove the number prefix
                 content = re.sub(r'^\d+\.\s*', '', line)
+                
+                # Skip if this looks like blog content, pages, or services
+                skip_keywords = ['blog post', 'blog', 'page', 'landing page', 'template', 
+                                'pricing', 'gallery', 'about', 'contact', 'guide', 
+                                'tutorial', 'how to', 'testing', 'speed testing']
+                
+                if any(keyword in content.lower() for keyword in skip_keywords):
+                    # This is blog content, not a product
+                    blog_title = content.replace('Blog Post About', '').replace('Blog Post', '').strip()
+                    blog_title = re.sub(r'\([^)]*\)', '', blog_title)  # Remove parentheses
+                    blog_title = re.sub(r'\$[\d.]+', '', blog_title)   # Remove price
+                    blog_title = blog_title.replace(' - ', ': ').strip()
+                    
+                    if blog_title and len(blog_title) > 5:
+                        # Clean up the title
+                        if blog_title.lower().startswith('about '):
+                            blog_title = blog_title[6:].strip()
+                        concept['blog_posts'].append(blog_title.title())
+                    current_product = {}
+                    continue
                 
                 # Split on dash to separate name/price from description
                 if ' - ' in content:
@@ -156,7 +194,15 @@ class CompleteShopifyStoreCreator:
                 product_name = re.sub(r'\$[\d.]+', '', product_name)      # Remove price
                 product_name = product_name.strip()
                 
-                if product_name:
+                # Check for duplicates (case-insensitive)
+                product_key = product_name.lower()
+                if product_key in product_names_seen:
+                    print(f"   ⚠️ Skipping duplicate product: {product_name}")
+                    current_product = {}
+                    continue
+                
+                if product_name and len(product_name) > 2:
+                    product_names_seen.add(product_key)
                     current_product = {
                         'name': product_name,
                         'price': price,
@@ -173,26 +219,42 @@ class CompleteShopifyStoreCreator:
                 if value and len(value) > 5:
                     concept['brand_values'].append(value)
             
-            # Extract blog post ideas - lines with quotes or "blog" mentions
-            elif ('blog' in line.lower() or '"' in line) and line.startswith('- '):
+            # Extract blog post ideas - lines with quotes or explicit blog mentions
+            elif ('blog' in line.lower() and ':' in line) or (line.startswith('- ') and '"' in line):
                 blog_title = line.replace('- ', '').replace('"', '').replace('**', '').replace('*', '').strip()
-                if blog_title and len(blog_title) > 10 and 'blog' not in blog_title.lower():
-                    concept['blog_posts'].append(blog_title)
+                if ':' in blog_title:
+                    blog_title = blog_title.split(':')[-1].strip()
+                if blog_title and len(blog_title) > 5:
+                    concept['blog_posts'].append(blog_title.title())
         
         # Add the last product if it exists
         if current_product and current_product.get('name'):
             concept['products'].append(current_product)
         
+        # Remove any remaining duplicates by name
+        unique_products = []
+        seen_names = set()
+        for product in concept['products']:
+            if product['name'].lower() not in seen_names:
+                unique_products.append(product)
+                seen_names.add(product['name'].lower())
+        concept['products'] = unique_products
+        
         # Debug output
-        print(f"   Parsed {len(concept['products'])} products from AI response")
+        print(f"   Parsed {len(concept['products'])} unique products from AI response")
         if concept['products']:
-            for p in concept['products'][:2]:  # Show first 2
+            for p in concept['products'][:3]:  # Show first 3
                 print(f"   - {p['name']}: ${p['price']}")
+        
+        if concept['blog_posts']:
+            print(f"   Parsed {len(concept['blog_posts'])} blog posts:")
+            for blog in concept['blog_posts'][:3]:
+                print(f"   - {blog}")
         
         # Ensure we have products - if parsing failed, use fallback
         if not concept['products']:
             print("   ⚠️ No products parsed, using fallback products")
-            concept['products'] = self._generate_fallback_products_for_prompt(response)
+            concept['products'] = self._generate_fallback_products_for_prompt(prompt)
         
         # Clean up data to fit Shopify limits
         concept['store_name'] = concept['store_name'][:50]  # Shopify limit
@@ -200,79 +262,782 @@ class CompleteShopifyStoreCreator:
         
         return concept
     
-    def _generate_fallback_products_for_prompt(self, response: str) -> List[Dict]:
-        """Generate contextual products based on the AI response content"""
-        response_lower = response.lower()
+    def _extract_products_from_prompt(self, prompt: str) -> List[Dict]:
+        """Extract specific product requests directly from user prompt - GENERIC approach"""
+        prompt_lower = prompt.lower()
+        products = []
         
-        if 'candle' in response_lower or 'fragrance' in response_lower:
-            return [
-                {'name': 'Vanilla Soy Candle', 'price': 32.99, 'description': 'Hand-poured vanilla scented soy candle', 'inventory': 45, 'sku': 'VAN001'},
-                {'name': 'Lavender Reed Diffuser', 'price': 28.99, 'description': 'Long-lasting lavender home fragrance', 'inventory': 32, 'sku': 'LAV001'},
-                {'name': 'Candle Care Set', 'price': 18.99, 'description': 'Wick trimmer and snuffer for candle care', 'inventory': 60, 'sku': 'CARE001'}
+        # Extract basic product information from natural language
+        product_indicators = [
+            'sells', 'selling', 'store that', 'store selling', 'shop that', 'shop selling',
+            'business that', 'business selling', 'want to sell', 'i want to sell', 'store for', 'shop for'
+        ]
+        
+        # Find what the user wants to sell
+        product_text = ""
+        for indicator in product_indicators:
+            if indicator in prompt_lower:
+                # Get text after the indicator
+                parts = prompt_lower.split(indicator, 1)
+                if len(parts) > 1:
+                    product_text = parts[1].strip()
+                    break
+        
+        if not product_text:
+            return []
+        
+        # Extract product name (everything before specifications)
+        # Remove common modifiers to get base product
+        product_name = product_text
+        
+        # Remove specification words but keep the product name
+        spec_removals = [
+            'make sure', 'ensure', 'with', 'that has', 'that have', 'featuring', 
+            'in stock', 'inventory', 'pieces', 'units', 'capacity', 'oz', 'ml'
+        ]
+        
+        for removal in spec_removals:
+            if removal in product_name:
+                product_name = product_name.split(removal)[0].strip()
+        
+        # Clean up the product name - remove common store creation phrases
+        cleanup_phrases = [
+            'a store that sells', 'store that sells', 'create a store selling', 
+            'store selling', 'i want a store selling', 'build a store for',
+            'create a store for', 'make a store that sells', 'premium', 'high-quality'
+        ]
+        
+        for phrase in cleanup_phrases:
+            product_name = product_name.replace(phrase, '').strip()
+        
+        # Extract just the core product (first 1-3 meaningful words)
+        words = [w for w in product_name.split() if len(w) > 2 and w.lower() not in ['the', 'and', 'for', 'with', 'premium', 'high-quality', '30oz', 'oz', 'ml', 'eco-friendly', 'organic']]
+        if words:
+            # Take first 1-2 words as the core product, check for common combinations
+            if len(words) >= 2:
+                two_word = ' '.join(words[:2]).lower()
+                if any(combo in two_word for combo in ['water bottle', 'water bottles', 'speed cube', 'speed cubes', 'yoga mat', 'yoga mats', 'coffee bean', 'coffee beans', 'toilet paper', 'wireless headphone', 'wireless headphones']):
+                    # Use singular form
+                    result = ' '.join(words[:2])
+                    if result.lower().endswith('s') and not result.lower().endswith('ss'):
+                        result = result[:-1]  # Remove plural 's'
+                    product_name = result
+                else:
+                    # Check if we should combine words for common products
+                    if words[0].lower() in ['toilet', 'wireless', 'speed', 'yoga', 'coffee'] and len(words) >= 2:
+                        product_name = ' '.join(words[:2])
+                        if product_name.lower().endswith('s') and not product_name.lower().endswith('ss'):
+                            product_name = product_name[:-1]
+                    else:
+                        # Just take the first word and make it singular if plural
+                        product_name = words[0]
+                        if product_name.lower().endswith('s') and not product_name.lower().endswith('ss'):
+                            product_name = product_name[:-1]
+            else:
+                product_name = words[0]
+                if product_name.lower().endswith('s') and not product_name.lower().endswith('ss'):
+                    product_name = product_name[:-1]
+        
+        # Handle special cases where we need to capture the organic/eco descriptors properly
+        original_words = product_text.split()
+        if 'organic' in prompt_lower and product_name.lower() != 'organic':
+            # Find what comes after organic
+            for i, word in enumerate(original_words):
+                if word.lower() == 'organic' and i + 1 < len(original_words):
+                    next_word = original_words[i + 1]
+                    if len(next_word) > 2 and next_word.lower() not in ['and', 'the', 'a']:
+                        if next_word.lower().endswith('s') and not next_word.lower().endswith('ss'):
+                            next_word = next_word[:-1]
+                        product_name = next_word
+                        material = 'organic'
+                        break
+        elif 'eco-friendly' in prompt_lower:
+            # Find what comes after eco-friendly
+            eco_index = prompt_lower.find('eco-friendly')
+            after_eco = prompt_lower[eco_index + len('eco-friendly'):].strip()
+            eco_words = [w for w in after_eco.split() if len(w) > 2 and w not in ['and', 'the', 'a']]
+            if eco_words:
+                if len(eco_words) >= 2 and any(combo in ' '.join(eco_words[:2]) for combo in ['yoga mat', 'yoga mats']):
+                    product_name = ' '.join(eco_words[:2])
+                    if product_name.endswith('s') and not product_name.endswith('ss'):
+                        product_name = product_name[:-1]
+                else:
+                    product_name = eco_words[0]
+                    if product_name.endswith('s') and not product_name.endswith('ss'):
+                        product_name = product_name[:-1]
+        
+        product_name = product_name.strip()
+        
+        if not product_name or len(product_name) < 3:
+            return []
+        
+        # Extract specifications from the full prompt
+        inventory = 50  # default
+        color = None
+        size = None
+        material = None
+        
+        # Parse inventory requirements
+        inventory_patterns = [
+            r'(\d+)\s*in\s*stock',
+            r'stock\s*of\s*(\d+)',
+            r'(\d+)\s*inventory',
+            r'theres?\s*(\d+)',
+            r'make\s*sure\s*theres?\s*(\d+)',
+            r'(\d+)\s*pieces',
+            r'(\d+)\s*units'
+        ]
+        for pattern in inventory_patterns:
+            inventory_match = re.search(pattern, prompt_lower)
+            if inventory_match:
+                inventory = int(inventory_match.group(1))
+                break
+        
+        # Parse color specifications
+        color_words = ['red', 'blue', 'green', 'black', 'white', 'silver', 'gold', 'yellow', 'purple', 'orange', 'pink', 'grey', 'gray', 'brown', 'clear', 'transparent']
+        for c in color_words:
+            if c in prompt_lower:
+                color = c
+                break
+        
+        # Parse size specifications (generic)
+        size_patterns = [
+            r'(\d+)\s*oz',
+            r'(\d+)\s*ml', 
+            r'(\d+)\s*inch',
+            r'(\d+)\s*cm',
+            r'(\d+)\s*ft',
+            r'(\d+)\s*meter',
+            r'size\s*(\w+)',
+            r'(\w+)\s*size'
+        ]
+        for pattern in size_patterns:
+            size_match = re.search(pattern, prompt_lower)
+            if size_match:
+                size = size_match.group(1)
+                break
+        
+        # Parse material specifications
+        materials = ['steel', 'stainless steel', 'plastic', 'wood', 'metal', 'glass', 'ceramic', 'cotton', 'polyester', 'leather', 'rubber', 'silicon', 'bamboo', 'organic']
+        for m in materials:
+            if m in prompt_lower:
+                material = m
+                break
+        
+        # Build the product name with specifications
+        final_name = product_name.title()
+        if size and color:
+            final_name = f"{size}oz {color.title()} {product_name.title()}"
+        elif size:
+            final_name = f"{size}oz {product_name.title()}"
+        elif color:
+            final_name = f"{color.title()} {product_name.title()}"
+        elif material:
+            final_name = f"{material.title()} {product_name.title()}"
+        
+        # Generate product-specific description
+        description = self._generate_product_specific_description(product_name, material, color, size)
+        
+        # Generate SKU
+        sku = ''.join([c.upper() for c in product_name if c.isalpha()])[:6]
+        if size:
+            sku += size.upper()
+        if color:
+            sku += color.upper()[:3]
+        sku = sku[:12] or f"PROD{random.randint(1000, 9999)}"
+        
+        # Base price (will be enhanced by market research)
+        base_price = random.uniform(15.99, 49.99)
+        
+        products.append({
+            'name': final_name,
+            'price': round(base_price, 2),
+            'description': description,
+            'inventory': inventory,
+            'sku': sku
+        })
+        
+        return products
+    
+    def _generate_fallback_products_for_prompt(self, prompt: str) -> List[Dict]:
+        """Generate appropriate fallback products based on the prompt - GENERIC approach"""
+        words = prompt.lower().split()
+        prompt_lower = prompt.lower()
+        
+        # Extract the main product from the prompt
+        main_product = self._extract_main_product_from_prompt(prompt_lower)
+        
+        if main_product:
+            # Generate variations of the main product
+            return self._generate_product_variations(main_product, prompt_lower)
+        else:
+            # Fallback to default products only if we can't parse anything
+            return self._generate_default_products()
+    
+    def _extract_main_product_from_prompt(self, prompt_lower: str) -> str:
+        """Extract the main product name from the prompt"""
+        # Common phrases that indicate what they want to sell
+        selling_phrases = [
+            'sells', 'selling', 'store that sells', 'shop that sells', 
+            'store selling', 'shop selling', 'want to sell', 'business that sells'
+        ]
+        
+        product_text = ""
+        for phrase in selling_phrases:
+            if phrase in prompt_lower:
+                parts = prompt_lower.split(phrase, 1)
+                if len(parts) > 1:
+                    product_text = parts[1].strip()
+                    break
+        
+        if not product_text:
+            return ""
+        
+        # Clean up the product text to get the main product
+        # Remove common stopwords and specifications
+        stopwords = ['and', 'the', 'a', 'an', 'that', 'with', 'make', 'sure', 'theres', 'there', 'are', 'is', 'in', 'stock', 'inventory', 'premium', 'high-quality']
+        
+        # Split by common delimiters and take the first meaningful part
+        for delimiter in [' make sure', ' with', ' that has', ' that have', ' featuring', ' capacity', ' oz', ' ml']:
+            if delimiter in product_text:
+                product_text = product_text.split(delimiter)[0]
+                break
+        
+        # Get first few words as the product name, but prioritize common product combinations
+        words = [w for w in product_text.split() if w not in stopwords and len(w) > 1]
+        
+        if words:
+            # Check for common two-word products first
+            two_word_products = ['water bottle', 'speed cube', 'yoga mat', 'coffee bean', 'toilet paper', 'phone case']
+            if len(words) >= 2:
+                potential_two_word = ' '.join(words[:2]).lower()
+                if any(product in potential_two_word for product in two_word_products):
+                    return ' '.join(words[:2])
+            
+            # Otherwise take just the first meaningful word
+            return words[0]
+        
+        return ""
+    
+    def _generate_product_specific_description(self, product_name: str, material: str = None, color: str = None, size: str = None) -> str:
+        """Generate product-specific descriptions based on the product type"""
+        product_lower = product_name.lower()
+        
+        # Water bottles and drinkware
+        if any(word in product_lower for word in ['water', 'bottle', 'flask', 'tumbler', 'mug']):
+            descriptions = [
+                f"Constructed from premium {material or 'stainless steel'}, this {product_name.lower()} features double-wall vacuum insulation that keeps beverages ice-cold for 24+ hours or piping hot for 12+ hours",
+                f"This {product_name.lower()} combines advanced insulation technology with leak-proof engineering, featuring a comfortable grip design and wide mouth for easy filling and cleaning",
+                f"Engineered for maximum hydration with fewer refills, this {product_name.lower()} offers superior temperature retention with durable construction built to last"
             ]
-        elif 'yoga' in response_lower or 'meditation' in response_lower:
-            return [
-                {'name': 'Premium Yoga Mat', 'price': 78.99, 'description': 'Non-slip premium yoga mat with alignment guide', 'inventory': 25, 'sku': 'MAT001'},
-                {'name': 'Meditation Cushion Set', 'price': 54.99, 'description': 'Comfortable zafu and zabuton set', 'inventory': 40, 'sku': 'CUSH001'},
-                {'name': 'Yoga Block Kit', 'price': 29.99, 'description': 'Cork blocks and cotton strap', 'inventory': 55, 'sku': 'BLOCK001'}
+            base_desc = random.choice(descriptions)
+            
+            if size:
+                base_desc += f". The {size} capacity provides optimal hydration for daily activities, commuting, or outdoor adventures"
+            else:
+                base_desc += f". Perfect for daily hydration, workouts, or travel"
+                
+            if color:
+                base_desc += f" with a sleek {color} finish that's both stylish and functional"
+                
+            if material and 'steel' in material:
+                base_desc += f". The ergonomic design includes comfort-grip features and fits most standard cup holders"
+            else:
+                base_desc += f". Features an ergonomic design for comfortable carrying and convenient storage"
+        
+        # Toilet paper and bathroom products
+        elif any(word in product_lower for word in ['toilet', 'paper', 'tissue']):
+            descriptions = [
+                f"Ultra-soft {product_name.lower()} crafted from sustainable bamboo fibers, offering superior comfort and absorbency with 3-ply construction for strength you can trust",
+                f"Premium {product_name.lower()} engineered with advanced quilting technology for maximum softness and durability, featuring septic-safe biodegradable materials",
+                f"Eco-conscious {product_name.lower()} made from 100% recycled materials with enhanced absorption and gentle texture for sensitive skin"
             ]
-        elif 'shirt' in response_lower or 'band' in response_lower or 'vintage' in response_lower:
-            return [
-                {'name': 'Vintage Nirvana Tour Tee', 'price': 89.99, 'description': 'Authentic 1990s tour shirt', 'inventory': 12, 'sku': 'NIR001'},
-                {'name': 'Rolling Stones Vintage Repro', 'price': 34.99, 'description': 'High-quality vintage reproduction', 'inventory': 28, 'sku': 'ROLL001'},
-                {'name': 'Metal Band Collection', 'price': 75.99, 'description': 'Rare metal band merchandise', 'inventory': 15, 'sku': 'METAL001'}
+            base_desc = random.choice(descriptions)
+            base_desc += ". Each sheet provides reliable performance for everyday use while being gentle on skin and safe for all plumbing systems. Manufactured using environmentally responsible processes for sustainable household care."
+        
+        # Electronics and tech
+        elif any(word in product_lower for word in ['headphones', 'earbuds', 'speaker', 'charger', 'phone', 'laptop']):
+            descriptions = [
+                f"Professional-grade {product_name.lower()} featuring advanced technology for superior performance",
+                f"High-quality {product_name.lower()} designed for seamless connectivity and exceptional user experience",
+                f"Premium {product_name.lower()} with cutting-edge features and reliable durability"
             ]
+            base_desc = random.choice(descriptions)
+            if color:
+                base_desc += f" in an elegant {color} finish"
+        
+        # Clothing and apparel
+        elif any(word in product_lower for word in ['shirt', 't-shirt', 'tee', 'hoodie', 'jacket', 'pants', 'jeans']):
+            descriptions = [
+                f"Comfortable {product_name.lower()} made from premium materials for all-day wearability",
+                f"Stylish {product_name.lower()} featuring modern design and superior fabric quality",
+                f"Classic {product_name.lower()} with perfect fit and timeless appeal"
+            ]
+            base_desc = random.choice(descriptions)
+            if material:
+                base_desc += f". Crafted from soft {material} for maximum comfort"
+            if color:
+                base_desc += f" available in vibrant {color}"
+        
+        # Home and garden
+        elif any(word in product_lower for word in ['candle', 'lamp', 'plant', 'planter', 'decor']):
+            descriptions = [
+                f"Elegant {product_name.lower()} designed to enhance your living space with style and functionality",
+                f"Beautiful {product_name.lower()} featuring premium craftsmanship and attention to detail",
+                f"Sophisticated {product_name.lower()} that brings warmth and ambiance to any room"
+            ]
+            base_desc = random.choice(descriptions)
+            if material:
+                base_desc += f". Made from quality {material} for lasting beauty"
+            if color:
+                base_desc += f" in a stunning {color} finish"
+        
+        # Sports and fitness
+        elif any(word in product_lower for word in ['yoga', 'mat', 'weights', 'dumbbells', 'fitness', 'exercise']):
+            descriptions = [
+                f"Professional {product_name.lower()} engineered for optimal performance and durability",
+                f"High-performance {product_name.lower()} designed to support your fitness goals",
+                f"Premium {product_name.lower()} featuring superior construction for serious athletes"
+            ]
+            base_desc = random.choice(descriptions)
+            if material:
+                base_desc += f". Made from durable {material} for long-lasting use"
+        
+        # Food and consumables
+        elif any(word in product_lower for word in ['coffee', 'tea', 'snack', 'protein', 'organic']):
+            descriptions = [
+                f"Premium {product_name.lower()} sourced from the finest ingredients for exceptional taste",
+                f"Artisanal {product_name.lower()} carefully crafted to deliver superior flavor and quality",
+                f"Gourmet {product_name.lower()} featuring rich, complex flavors that satisfy discerning palates"
+            ]
+            base_desc = random.choice(descriptions)
+            if 'organic' in (material or '') or 'organic' in product_lower:
+                base_desc += ". Certified organic and sustainably sourced"
+        
+        # Beauty and personal care
+        elif any(word in product_lower for word in ['soap', 'shampoo', 'lotion', 'cream', 'skincare']):
+            descriptions = [
+                f"Luxurious {product_name.lower()} formulated with natural ingredients for healthy, radiant results",
+                f"Premium {product_name.lower()} designed to nourish and protect with gentle, effective care",
+                f"Professional-grade {product_name.lower()} featuring advanced formulation for superior performance"
+            ]
+            base_desc = random.choice(descriptions)
+            base_desc += ". Dermatologist-tested and suitable for daily use"
+        
+        # Toys and games
+        elif any(word in product_lower for word in ['cube', 'rubik', 'puzzle', 'game', 'toy']):
+            descriptions = [
+                f"Professional {product_name.lower()} engineered for smooth operation and competitive performance",
+                f"High-quality {product_name.lower()} featuring precision construction and superior mechanics",
+                f"Premium {product_name.lower()} designed for both beginners and advanced enthusiasts"
+            ]
+            base_desc = random.choice(descriptions)
+            if color:
+                base_desc += f" with vibrant {color} color scheme"
+        
+        # Books and media
+        elif any(word in product_lower for word in ['book', 'novel', 'guide', 'manual']):
+            descriptions = [
+                f"Comprehensive {product_name.lower()} packed with valuable insights and practical knowledge",
+                f"Engaging {product_name.lower()} written by experts to inform, inspire, and educate",
+                f"Essential {product_name.lower()} featuring in-depth coverage and expert analysis"
+            ]
+            base_desc = random.choice(descriptions)
+            base_desc += ". Perfect for both beginners and advanced readers"
+        
+        # Jewelry and accessories
+        elif any(word in product_lower for word in ['necklace', 'bracelet', 'ring', 'earrings', 'jewelry']):
+            descriptions = [
+                f"Exquisite {product_name.lower()} handcrafted with attention to detail and timeless elegance",
+                f"Stunning {product_name.lower()} featuring premium materials and sophisticated design",
+                f"Beautiful {product_name.lower()} created by skilled artisans for lasting beauty"
+            ]
+            base_desc = random.choice(descriptions)
+            if material:
+                base_desc += f". Made from genuine {material} for authentic luxury"
+        
+        # Generic fallback for unknown products
+        else:
+            descriptions = [
+                f"Premium {product_name.lower()} crafted with attention to detail and superior quality",
+                f"High-quality {product_name.lower()} designed for performance and durability",
+                f"Professional-grade {product_name.lower()} featuring excellent construction and reliability"
+            ]
+            base_desc = random.choice(descriptions)
+            if material:
+                base_desc += f". Made from quality {material}"
+            if color:
+                base_desc += f" in {color}"
+            if size:
+                base_desc += f" with {size} specifications"
+        
+        return base_desc
+    
+    def _generate_product_variations(self, base_product: str, prompt_lower: str) -> List[Dict]:
+        """Generate variations of a product based on the prompt"""
+        products = []
+        base_product = base_product.strip()
+        
+        if not base_product:
+            return self._generate_default_products()
+        
+        # Parse specifications from the prompt
+        specs = self._parse_product_specifications(prompt_lower)
+        
+        # Generate base product
+        main_product = self._create_product_variant(base_product, specs)
+        products.append(main_product)
+        
+        # Generate logical variations (2-3 additional products)
+        variations = self._generate_logical_variations(base_product, specs)
+        products.extend(variations)
+        
+        return products[:4]  # Limit to 4 products max
+    
+    def _parse_product_specifications(self, prompt_lower: str) -> Dict:
+        """Parse specifications from the prompt"""
+        specs = {
+            'colors': [],
+            'sizes': [],
+            'materials': [],
+            'features': [],
+            'inventory': 50
+        }
+        
+        # Parse colors
+        color_words = ['red', 'blue', 'green', 'black', 'white', 'silver', 'gold', 'yellow', 'purple', 'orange', 'pink', 'grey', 'gray', 'brown']
+        specs['colors'] = [color for color in color_words if color in prompt_lower]
+        
+        # Parse sizes
+        size_patterns = [
+            r'(\d+)\s*oz', r'(\d+)\s*ml', r'(\d+)\s*inch', r'(\d+)\s*cm',
+            r'small', r'medium', r'large', r'extra large', r'xl'
+        ]
+        for pattern in size_patterns:
+            matches = re.findall(pattern, prompt_lower)
+            if matches:
+                specs['sizes'].extend(matches)
+        
+        # Parse materials
+        materials = ['steel', 'stainless steel', 'plastic', 'wood', 'metal', 'glass', 'ceramic', 'cotton', 'polyester', 'leather', 'rubber', 'silicon', 'bamboo', 'organic']
+        specs['materials'] = [mat for mat in materials if mat in prompt_lower]
+        
+        # Parse inventory
+        inventory_patterns = [
+            r'(\d+)\s*in\s*stock', r'stock\s*of\s*(\d+)', r'(\d+)\s*inventory',
+            r'theres?\s*(\d+)', r'(\d+)\s*pieces', r'(\d+)\s*units'
+        ]
+        for pattern in inventory_patterns:
+            match = re.search(pattern, prompt_lower)
+            if match:
+                specs['inventory'] = int(match.group(1))
+                break
+        
+        return specs
+    
+    def _create_product_variant(self, base_product: str, specs: Dict, variant_type: str = 'standard') -> Dict:
+        """Create a single product variant"""
+        # Build product name
+        name_parts = []
+        
+        if variant_type == 'premium':
+            name_parts.append('Premium')
+        elif variant_type == 'eco':
+            name_parts.append('Eco-Friendly')
+        elif variant_type == 'deluxe':
+            name_parts.append('Deluxe')
+        
+        if specs['sizes'] and variant_type == 'standard':
+            name_parts.append(specs['sizes'][0])
+        elif variant_type == 'large' and 'large' not in specs['sizes']:
+            name_parts.append('Large')
+        elif variant_type == 'small' and 'small' not in specs['sizes']:
+            name_parts.append('Compact')
+        
+        if specs['colors'] and variant_type == 'standard':
+            name_parts.append(specs['colors'][0].title())
+        elif variant_type != 'standard' and specs['colors']:
+            # Use different color for variants
+            available_colors = [c for c in specs['colors'] if c != specs['colors'][0]]
+            if available_colors:
+                name_parts.append(available_colors[0].title())
+        
+        if specs['materials'] and variant_type == 'standard':
+            name_parts.append(specs['materials'][0].title())
+        
+        name_parts.append(base_product.title())
+        
+        product_name = ' '.join(name_parts)
+        
+        # Generate product-specific description with variant modifier
+        material = specs['materials'][0] if specs['materials'] else None
+        color = specs['colors'][0] if specs['colors'] and variant_type == 'standard' else None
+        if variant_type != 'standard' and specs['colors']:
+            available_colors = [c for c in specs['colors'] if c != specs['colors'][0]]
+            if available_colors:
+                color = available_colors[0]
+        
+        # Get base description from product-specific generator
+        base_description = self._generate_product_specific_description(base_product, material, color)
+        
+        # Add variant-specific modifiers
+        if variant_type == 'premium':
+            description = base_description.replace("Premium", "Ultra-Premium").replace("High-quality", "Luxury")
+            description += " Enhanced with premium features and superior materials for the ultimate experience."
+        elif variant_type == 'eco':
+            description = base_description.replace("Premium", "Eco-Friendly").replace("High-quality", "Sustainable")
+            description += " Made with environmentally responsible materials and processes."
+        elif variant_type == 'deluxe':
+            description = base_description.replace("Premium", "Deluxe").replace("High-quality", "Professional-grade")
+            description += " Features enhanced design and advanced functionality for demanding users."
+        elif variant_type == 'large':
+            description = base_description
+            description += " Available in generous sizing for extended use and maximum convenience."
+        else:
+            description = base_description
+        
+        # Generate price based on variant type
+        base_price = random.uniform(15.99, 39.99)
+        if variant_type == 'premium':
+            base_price *= 1.5
+        elif variant_type == 'deluxe':
+            base_price *= 1.3
+        elif variant_type == 'eco':
+            base_price *= 1.2
+        
+        # Generate SKU
+        sku_parts = [''.join([c.upper() for c in base_product if c.isalpha()])[:4]]
+        if variant_type != 'standard':
+            sku_parts.append(variant_type.upper()[:3])
+        sku = ''.join(sku_parts) + f"{random.randint(10, 99)}"
+        
+        return {
+            'name': product_name,
+            'price': round(base_price, 2),
+            'description': description,
+            'inventory': specs['inventory'] if variant_type == 'standard' else random.randint(30, 60),
+            'sku': sku[:12]
+        }
+    
+    def _generate_logical_variations(self, base_product: str, specs: Dict) -> List[Dict]:
+        """Generate logical variations of the base product"""
+        variations = []
+        
+        # Generate a premium variant
+        premium = self._create_product_variant(base_product, specs, 'premium')
+        variations.append(premium)
+        
+        # Generate an eco-friendly variant
+        eco = self._create_product_variant(base_product, specs, 'eco')
+        variations.append(eco)
+        
+        # Generate a size variant if sizes were mentioned
+        if specs['sizes']:
+            size_variant = self._create_product_variant(base_product, specs, 'large')
+            variations.append(size_variant)
+        else:
+            # Generate a deluxe variant instead
+            deluxe = self._create_product_variant(base_product, specs, 'deluxe')
+            variations.append(deluxe)
+        
+        return variations[:3]  # Return max 3 variations
+    
+    def _generate_fallback_products_for_prompt(self, prompt: str) -> List[Dict]:
+        """Generate appropriate fallback products based on the prompt"""
+        words = prompt.lower().split()
+        prompt_lower = prompt.lower()
+        
+        # Check for water bottle requests with specific sizes
+        if 'water' in prompt_lower and 'bottle' in prompt_lower:
+            products = []
+            
+            # Look for specific sizes mentioned (10oz, 20oz, 30oz, etc.)
+            import re
+            size_matches = re.findall(r'(\d+)\s*oz', prompt_lower)
+            
+            if size_matches:
+                # Create products for each size mentioned
+                for size in size_matches:
+                    size_int = int(size)
+                    # Price based on size (bigger = more expensive)
+                    base_price = 15.99 + (size_int * 0.75)
+                    
+                    products.append({
+                        'name': f'{size}oz Stainless Steel Water Bottle',
+                        'price': round(base_price, 2),
+                        'description': f'Premium {size}oz insulated stainless steel water bottle that keeps drinks cold for 24 hours and hot for 12 hours. Double-wall vacuum insulation with leak-proof cap.',
+                        'inventory': 40 + (10 - len(size_matches)) * 5,  # More inventory for fewer sizes
+                        'sku': f'BOTTLE{size}OZ'
+                    })
+                
+                return products
+            else:
+                # Default water bottle selection if no specific sizes
+                return [
+                    {'name': '10oz Stainless Steel Water Bottle', 'price': 22.99, 'description': 'Compact 10oz insulated bottle perfect for kids or short trips', 'inventory': 45, 'sku': 'BOTTLE10OZ'},
+                    {'name': '20oz Stainless Steel Water Bottle', 'price': 29.99, 'description': 'Standard 20oz insulated bottle ideal for daily hydration', 'inventory': 50, 'sku': 'BOTTLE20OZ'},
+                    {'name': '30oz Stainless Steel Water Bottle', 'price': 36.99, 'description': 'Large 30oz insulated bottle for all-day hydration', 'inventory': 35, 'sku': 'BOTTLE30OZ'}
+                ]
+        
+        elif any(word in words for word in ['rubik', 'cube', 'speedcube', 'speedcubing']):
+            return [
+                {'name': 'Speed Cube 3x3', 'price': 34.99, 'description': 'Professional magnetic 3x3 speed cube with smooth turning', 'inventory': 50, 'sku': 'CUBE3X3'},
+                {'name': 'Speed Cube 2x2', 'price': 19.99, 'description': 'Compact 2x2 pocket cube for beginners', 'inventory': 45, 'sku': 'CUBE2X2'},
+                {'name': 'Speed Cube 4x4', 'price': 49.99, 'description': 'Advanced 4x4 magnetic speed cube', 'inventory': 30, 'sku': 'CUBE4X4'},
+                {'name': 'Cube Timer Pro', 'price': 24.99, 'description': 'Professional speedcubing timer with precision timing', 'inventory': 35, 'sku': 'TIMER001'},
+                {'name': 'Cube Lubricant Set', 'price': 15.99, 'description': 'Premium cube lubricants for optimal performance', 'inventory': 60, 'sku': 'LUBE001'}
+            ]
+        elif any(word in words for word in ['candle', 'scented', 'wax', 'fragrance']):
+            return [
+                {'name': 'Vanilla Soy Candle', 'price': 24.99, 'description': 'Natural vanilla scented candle', 'inventory': 45, 'sku': 'VAN001'},
+                {'name': 'Lavender Dream Candle', 'price': 27.99, 'description': 'Relaxing lavender scented candle', 'inventory': 32, 'sku': 'LAV001'},
+                {'name': 'Eucalyptus Mint Candle', 'price': 26.99, 'description': 'Refreshing eucalyptus mint aromatherapy candle', 'inventory': 40, 'sku': 'EUC001'},
+                {'name': 'Candle Care Kit', 'price': 12.99, 'description': 'Wick trimmer and snuffer set', 'inventory': 60, 'sku': 'CARE001'}
+            ]
+        elif any(word in words for word in ['yoga', 'meditation', 'mat', 'pilates']):
+            return [
+                {'name': 'Premium Yoga Mat', 'price': 78.99, 'description': 'Non-slip premium yoga mat', 'inventory': 25, 'sku': 'MAT001'},
+                {'name': 'Meditation Cushion', 'price': 45.99, 'description': 'Comfortable meditation cushion', 'inventory': 40, 'sku': 'CUSH001'},
+                {'name': 'Cork Yoga Blocks', 'price': 29.99, 'description': 'Set of 2 cork yoga blocks for support', 'inventory': 55, 'sku': 'BLOCK001'},
+                {'name': 'Yoga Strap', 'price': 18.99, 'description': 'Adjustable yoga strap for deeper stretches', 'inventory': 35, 'sku': 'STRAP001'}
+            ]
+        elif any(word in words for word in ['card', 'cards', 'deck', 'playing', 'poker']):
+            return [
+                {'name': 'Premium Playing Cards', 'price': 8.99, 'description': 'Professional-grade playing cards with premium linen finish and superior durability for smooth shuffling and dealing', 'inventory': 100, 'sku': 'CARDS001'},
+                {'name': 'Waterproof Playing Cards', 'price': 14.99, 'description': '100% plastic waterproof cards perfect for outdoor games, pool parties, and heavy use', 'inventory': 60, 'sku': 'CARDS002'},
+                {'name': 'Luxury Gold Edition Cards', 'price': 24.99, 'description': 'Elegant playing cards with gold foil accents and custom artwork in premium gift box', 'inventory': 45, 'sku': 'CARDS003'},
+                {'name': 'Jumbo Index Playing Cards', 'price': 6.99, 'description': 'Easy-to-read large index cards perfect for seniors and low-vision players', 'inventory': 70, 'sku': 'CARDS004'}
+            ]
+        elif any(word in words for word in ['coffee', 'espresso', 'beans', 'roast']):
+            return [
+                {'name': 'Premium Ethiopian Coffee', 'price': 18.99, 'description': 'Single-origin Ethiopian coffee with bright floral notes and citrus undertones', 'inventory': 50, 'sku': 'COFFEE001'},
+                {'name': 'Rich Colombian Blend', 'price': 16.99, 'description': 'Smooth Colombian coffee with chocolate and caramel notes, medium roast', 'inventory': 40, 'sku': 'COFFEE002'},
+                {'name': 'Dark Roast Signature Blend', 'price': 15.99, 'description': 'Bold dark roast with smoky flavor and rich body, perfect for espresso', 'inventory': 35, 'sku': 'COFFEE003'},
+                {'name': 'House Blend Coffee', 'price': 14.99, 'description': 'Balanced medium roast blend perfect for everyday brewing and drip coffee', 'inventory': 45, 'sku': 'COFFEE004'}
+            ]
+        elif any(word in words for word in ['jewelry', 'necklace', 'bracelet', 'ring', 'earring']):
+            return [
+                {'name': 'Moonstone Silver Necklace', 'price': 89.99, 'description': 'Handcrafted sterling silver necklace with genuine moonstone pendant', 'inventory': 25, 'sku': 'MOON001'},
+                {'name': 'Rose Quartz Stud Earrings', 'price': 124.99, 'description': 'Natural rose quartz gemstone earrings in 14k gold setting', 'inventory': 20, 'sku': 'ROSE001'},
+                {'name': 'Amethyst Statement Ring', 'price': 149.99, 'description': 'Bold amethyst cocktail ring with vintage-inspired design', 'inventory': 15, 'sku': 'AMETHYST001'},
+                {'name': 'Turquoise Link Bracelet', 'price': 199.99, 'description': 'Southwestern-style bracelet featuring genuine turquoise stones', 'inventory': 12, 'sku': 'TURQ001'}
+            ]
+        elif any(word in words for word in ['book', 'books', 'novel', 'reading']):
+            return [
+                {'name': 'Mystery Novel Collection', 'price': 24.99, 'description': 'Thrilling mystery novel paperback', 'inventory': 60, 'sku': 'MYSTERY001'},
+                {'name': 'Science Fiction Epic', 'price': 19.99, 'description': 'Award-winning science fiction novel', 'inventory': 45, 'sku': 'SCIFI001'},
+                {'name': 'Self-Help Guide', 'price': 16.99, 'description': 'Practical life improvement handbook', 'inventory': 55, 'sku': 'HELP001'},
+                {'name': 'Cookbook Masterclass', 'price': 29.99, 'description': 'Professional chef cookbook with 200+ recipes', 'inventory': 30, 'sku': 'COOK001'}
+            ]
+        elif any(word in words for word in ['fitness', 'weights', 'dumbbells', 'exercise', 'gym']):
+            return [
+                {'name': 'Adjustable Dumbbells Set', 'price': 199.99, 'description': 'Space-saving adjustable dumbbells with quick weight changes from 5-50 lbs per dumbbell', 'inventory': 20, 'sku': 'FITNESS001'},
+                {'name': 'Resistance Band Set', 'price': 34.99, 'description': 'Professional resistance bands with varying resistance levels and door anchor system', 'inventory': 40, 'sku': 'FITNESS002'},
+                {'name': 'Premium Foam Roller', 'price': 29.99, 'description': 'High-density foam roller for deep tissue massage and muscle recovery therapy', 'inventory': 35, 'sku': 'FITNESS003'},
+                {'name': 'Exercise Mat Pro', 'price': 39.99, 'description': 'Non-slip exercise mat with alignment guides for yoga, pilates, and stretching', 'inventory': 45, 'sku': 'FITNESS004'}
+            ]
+        elif any(word in words for word in ['plant', 'plants', 'succulent', 'garden', 'flower']):
+            return [
+                {'name': 'Succulent Garden Set', 'price': 34.99, 'description': 'Collection of 6 assorted succulent plants perfect for indoor gardens', 'inventory': 25, 'sku': 'PLANT001'},
+                {'name': 'Modern Ceramic Planter', 'price': 18.99, 'description': 'Sleek ceramic planter with drainage system for optimal plant health', 'inventory': 40, 'sku': 'PLANT002'},
+                {'name': 'Plant Care Essentials Kit', 'price': 24.99, 'description': 'Complete plant care tools and organic fertilizer set for healthy growth', 'inventory': 35, 'sku': 'PLANT003'},
+                {'name': 'Hanging Garden Planter', 'price': 29.99, 'description': 'Macrame hanging planter perfect for air plants and trailing varieties', 'inventory': 30, 'sku': 'PLANT004'}
+            ]
+        elif any(word in words for word in ['toilet', 'paper', 'bathroom', 'tissue']):
+            return [
+                {'name': 'Ultra-Soft Toilet Paper', 'price': 12.99, 'description': '3-ply ultra-soft toilet paper made from sustainable bamboo fibers, 12-pack', 'inventory': 100, 'sku': 'TOILET001'},
+                {'name': 'Eco-Friendly Toilet Paper', 'price': 15.99, 'description': '100% recycled toilet paper that is septic-safe and environmentally friendly, 24-pack', 'inventory': 80, 'sku': 'TOILET002'},
+                {'name': 'Premium Quilted Toilet Paper', 'price': 18.99, 'description': 'Luxurious quilted toilet paper with aloe and vitamin E for ultimate comfort, 18-pack', 'inventory': 60, 'sku': 'TOILET003'},
+                {'name': 'Commercial Grade Toilet Paper', 'price': 22.99, 'description': 'Bulk commercial toilet paper perfect for offices and high-traffic areas, 36-pack', 'inventory': 40, 'sku': 'TOILET004'}
+            ]
+        elif any(word in words for word in ['soap', 'shampoo', 'body', 'wash', 'personal', 'care']):
+            return [
+                {'name': 'Natural Body Soap', 'price': 8.99, 'description': 'Handcrafted natural soap with organic oils and essential fragrances', 'inventory': 60, 'sku': 'SOAP001'},
+                {'name': 'Moisturizing Shampoo', 'price': 14.99, 'description': 'Sulfate-free shampoo with argan oil for healthy, shiny hair', 'inventory': 45, 'sku': 'SOAP002'},
+                {'name': 'Exfoliating Body Scrub', 'price': 12.99, 'description': 'Gentle exfoliating scrub with sea salt and natural botanicals', 'inventory': 35, 'sku': 'SOAP003'},
+                {'name': 'Luxury Body Wash Set', 'price': 24.99, 'description': 'Premium body wash collection with 3 signature scents', 'inventory': 30, 'sku': 'SOAP004'}
+            ]
+        elif any(word in words for word in ['phone', 'case', 'screen', 'protector', 'mobile', 'accessories']):
+            return [
+                {'name': 'Universal Phone Case', 'price': 19.99, 'description': 'Protective phone case with shock absorption and wireless charging compatibility', 'inventory': 75, 'sku': 'PHONE001'},
+                {'name': 'Tempered Glass Screen Protector', 'price': 9.99, 'description': 'Ultra-clear tempered glass screen protector with bubble-free installation', 'inventory': 100, 'sku': 'PHONE002'},
+                {'name': 'Wireless Charging Pad', 'price': 29.99, 'description': 'Fast wireless charging pad compatible with all Qi-enabled devices', 'inventory': 50, 'sku': 'PHONE003'},
+                {'name': 'Portable Phone Stand', 'price': 14.99, 'description': 'Adjustable phone stand perfect for video calls and media viewing', 'inventory': 60, 'sku': 'PHONE004'}
+            ]
+        elif any(word in words for word in ['snack', 'food', 'nuts', 'chips', 'healthy']):
+            return [
+                {'name': 'Gourmet Trail Mix', 'price': 8.99, 'description': 'Premium trail mix with almonds, cranberries, and dark chocolate chips', 'inventory': 80, 'sku': 'SNACK001'},
+                {'name': 'Organic Protein Bars', 'price': 24.99, 'description': 'Plant-based protein bars with natural ingredients, 12-pack variety', 'inventory': 50, 'sku': 'SNACK002'},
+                {'name': 'Artisan Nut Collection', 'price': 16.99, 'description': 'Roasted and seasoned premium nuts including cashews, almonds, and pecans', 'inventory': 40, 'sku': 'SNACK003'},
+                {'name': 'Healthy Veggie Chips', 'price': 6.99, 'description': 'Baked vegetable chips made from sweet potatoes, beets, and carrots', 'inventory': 70, 'sku': 'SNACK004'}
+            ]
+        else:
+            return self._generate_default_products()
+    
     def _generate_default_products(self) -> List[Dict]:
-        """Generate default products if AI parsing fails"""
+        """Generate default products with original brand names"""
         return [
             {
-                'name': 'Starter Bundle',
-                'price': 49.99,
-                'description': 'Perfect starter pack for beginners',
-                'inventory': 50,
-                'sku': 'START001'
-            },
-            {
-                'name': 'Premium Kit',
-                'price': 89.99,
-                'description': 'Professional-grade premium collection',
+                'name': 'Premium Wireless Headphones',
+                'price': 79.99,
+                'description': 'High-quality wireless headphones with active noise cancellation and 20-hour battery life',
                 'inventory': 30,
-                'sku': 'PREM001'
+                'sku': 'HEADPHONES001'
             },
             {
-                'name': 'Essential Set',
+                'name': 'Insulated Water Bottle',
+                'price': 24.99,
+                'description': 'Double-wall vacuum insulated water bottle that keeps drinks cold for 24 hours',
+                'inventory': 50,
+                'sku': 'BOTTLE001'
+            },
+            {
+                'name': 'Eco-Friendly T-Shirt',
                 'price': 29.99,
-                'description': 'Everything you need in one package',
+                'description': 'Soft organic cotton t-shirt with comfortable fit and sustainable materials',
                 'inventory': 75,
-                'sku': 'ESS001'
+                'sku': 'SHIRT001'
+            },
+            {
+                'name': 'Smart LED Desk Lamp',
+                'price': 45.99,
+                'description': 'Adjustable LED desk lamp with multiple brightness levels and USB charging port',
+                'inventory': 40,
+                'sku': 'LAMP001'
             }
         ]
     
     def _create_fallback_concept(self, prompt: str) -> Dict:
-        """Create a basic concept if AI fails"""
-        # Extract key words from prompt
-        words = prompt.lower().split()
+        """Create a concept based on the user's specific request if AI fails - GENERIC approach"""
+        # Extract key information from prompt
+        prompt_lower = prompt.lower()
         
-        if 'candle' in words:
-            store_name = 'Artisan Candle Co.'
-            tagline = 'Hand-Poured Perfection'
-            products = [
-                {'name': 'Vanilla Soy Candle', 'price': 24.99, 'description': 'Natural vanilla scented candle', 'inventory': 45, 'sku': 'VAN001'},
-                {'name': 'Lavender Dream Candle', 'price': 27.99, 'description': 'Relaxing lavender scented candle', 'inventory': 32, 'sku': 'LAV001'},
-                {'name': 'Candle Care Kit', 'price': 12.99, 'description': 'Wick trimmer and snuffer set', 'inventory': 60, 'sku': 'CARE001'}
-            ]
-        elif 'yoga' in words:
-            store_name = 'Zen Flow Studio'
-            tagline = 'Find Your Inner Peace'
-            products = [
-                {'name': 'Premium Yoga Mat', 'price': 78.99, 'description': 'Non-slip premium yoga mat', 'inventory': 25, 'sku': 'MAT001'},
-                {'name': 'Meditation Cushion', 'price': 45.99, 'description': 'Comfortable meditation cushion', 'inventory': 40, 'sku': 'CUSH001'},
-                {'name': 'Yoga Block Set', 'price': 29.99, 'description': 'Cork yoga blocks for support', 'inventory': 55, 'sku': 'BLOCK001'}
-            ]
+        # Try to extract products first
+        extracted_products = self._extract_products_from_prompt(prompt)
+        if extracted_products:
+            # Build store concept around the extracted products
+            product_name = extracted_products[0]['name']
+            
+            # Generate store name based on the product
+            base_product = self._extract_main_product_from_prompt(prompt_lower)
+            if base_product:
+                store_name = f"{base_product.title()} Store"
+            else:
+                store_name = "Custom Store"
+            
+            tagline = "Exactly What You Asked For"
+            products = extracted_products
         else:
-            store_name = 'Curated Collection'
-            tagline = 'Quality Products, Exceptional Service'
-            products = self._generate_default_products()
+            # Fallback to generic products if we can't parse anything specific
+            main_product = self._extract_main_product_from_prompt(prompt_lower)
+            if main_product:
+                store_name = f"{main_product.title()} Store"
+                tagline = f"Premium {main_product.title()} Products"
+                products = self._generate_product_variations(main_product, prompt_lower)
+            else:
+                store_name = 'Quality Goods Store'
+                tagline = 'Premium Products, Exceptional Value'
+                products = self._generate_default_products()
         
         return {
             'store_name': store_name,
@@ -368,42 +1133,281 @@ class CompleteShopifyStoreCreator:
         # Shopify API call would go here
     
     def _create_products(self, products: List[Dict]) -> List[int]:
-        """Create products in Shopify"""
+        """Create products in Shopify with enhanced descriptions and competitive pricing"""
         product_ids = []
-        print(f"📦 Creating {len(products)} products...")
+        print(f"📦 Creating {len(products)} products with market research...")
         
         for product in products:
-            print(f"   ✅ {product['name']} - ${product['price']}")
-            # Shopify API call would go here
-            product_ids.append(random.randint(1000000, 9999999))
-            time.sleep(0.5)
+            # Enhance product with market research
+            print(f"🔍 Researching: {product['name']}")
+            enhanced_product = self.researcher.enhance_product_with_research(product)
+            
+            print(f"   ✅ {enhanced_product['name']} - ${enhanced_product['price']:.2f}")
+            if enhanced_product.get('market_research', {}).get('research_notes'):
+                print(f"      💡 {enhanced_product['market_research']['research_notes']}")
+            
+            # Create detailed HTML description
+            html_description = self._create_product_html_description(enhanced_product)
+            
+            # Create the product via Shopify API
+            product_data = {
+                "product": {
+                    "title": enhanced_product['name'],
+                    "body_html": html_description,
+                    "vendor": "Premium Store",
+                    "product_type": self._determine_product_type(enhanced_product['name']),
+                    "tags": self._generate_product_tags(enhanced_product),
+                    "variants": [{
+                        "price": str(enhanced_product['price']),
+                        "sku": enhanced_product.get('sku', f"SKU-{random.randint(1000, 9999)}"),
+                        "inventory_management": "shopify",
+                        "inventory_quantity": enhanced_product.get('inventory', 50),
+                        "weight": random.randint(100, 2000),  # grams
+                        "requires_shipping": True
+                    }],
+                    "images": []  # Could add image URLs here
+                }
+            }
+            
+            try:
+                response = requests.post(
+                    f"{self.api_base}/products.json",
+                    headers=self.headers,
+                    json=product_data
+                )
+                
+                if response.status_code == 201:
+                    product_id = response.json()['product']['id']
+                    product_ids.append(product_id)
+                    
+                    # Generate and upload product image
+                    self._add_product_image(product_id, enhanced_product['name'])
+                    
+                else:
+                    print(f"   ⚠️ Failed to create {product['name']}: {response.status_code}")
+                    print(f"   Error: {response.text}")
+                    
+            except Exception as e:
+                print(f"   ❌ API error for {product['name']}: {e}")
+            
+            time.sleep(0.5)  # Rate limiting
         
         return product_ids
+    
+    def _create_product_html_description(self, product: Dict) -> str:
+        """Create detailed HTML description for a product"""
+        description = product.get('description', '')
+        features = product.get('key_features', [])
+        
+        html = f"<div class='product-description'>"
+        html += f"<p class='main-description'>{description}</p>"
+        
+        if features:
+            html += "<h3>Key Features:</h3><ul class='feature-list'>"
+            for feature in features[:6]:  # Limit to 6 features
+                html += f"<li>{feature}</li>"
+            html += "</ul>"
+        
+        # Market research is kept internal only - not displayed on website
+        
+        html += "</div>"
+        return html
+    
+    def _determine_product_type(self, product_name: str) -> str:
+        """Determine Shopify product type based on product name"""
+        name_lower = product_name.lower()
+        
+        if any(word in name_lower for word in ['cube', 'rubik', 'timer']):
+            return "Puzzles & Games"
+        elif 'candle' in name_lower:
+            return "Home & Garden"
+        elif any(word in name_lower for word in ['yoga', 'meditation', 'mat']):
+            return "Sports & Recreation"
+        elif any(word in name_lower for word in ['shirt', 'tee', 'clothing']):
+            return "Apparel & Accessories"
+        else:
+            return "General"
+    
+    def _generate_product_tags(self, product: Dict) -> str:
+        """Generate relevant tags for the product"""
+        name = product['name'].lower()
+        tags = []
+        
+        # Add category-based tags
+        if 'cube' in name or 'rubik' in name:
+            tags.extend(['speedcube', 'puzzle', 'brain-teaser', 'competition', 'fidget'])
+        elif 'candle' in name:
+            tags.extend(['home-decor', 'aromatherapy', 'relaxation', 'ambiance', 'gift'])
+        elif 'yoga' in name or 'meditation' in name:
+            tags.extend(['wellness', 'fitness', 'mindfulness', 'exercise', 'health'])
+        
+        # Add quality indicators
+        tags.extend(['premium', 'professional', 'high-quality'])
+        
+        return ', '.join(tags)
     
     def _create_collection(self, concept: Dict) -> int:
         """Create product collection"""
         collection_name = f"{concept['store_name']} Collection"
         print(f"📚 Creating collection: {collection_name}")
-        # Shopify API call would go here
-        return random.randint(100000, 999999)
+        
+        collection_data = {
+            "custom_collection": {
+                "title": collection_name,
+                "body_html": f"Curated collection of {concept['store_name']} products",
+                "published": True
+            }
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.api_base}/custom_collections.json",
+                headers=self.headers,
+                json=collection_data
+            )
+            
+            if response.status_code == 201:
+                collection_id = response.json()['custom_collection']['id']
+                return collection_id
+            else:
+                print(f"   ⚠️ Failed to create collection: {response.status_code}")
+                print(f"   Error: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"   ❌ API error creating collection: {e}")
+            return None
     
     def _add_products_to_collection(self, collection_id: int, product_ids: List[int]):
         """Add products to collection"""
+        if not collection_id or not product_ids:
+            return
+            
         print(f"🔗 Adding {len(product_ids)} products to collection")
-        # Shopify API calls would go here
+        
+        for product_id in product_ids:
+            collect_data = {
+                "collect": {
+                    "product_id": product_id,
+                    "collection_id": collection_id
+                }
+            }
+            
+            try:
+                response = requests.post(
+                    f"{self.api_base}/collects.json",
+                    headers=self.headers,
+                    json=collect_data
+                )
+                
+                if response.status_code != 201:
+                    print(f"   ⚠️ Failed to add product {product_id} to collection")
+                    
+            except Exception as e:
+                print(f"   ❌ API error adding product to collection: {e}")
+            
+            time.sleep(0.2)  # Rate limiting
     
     def _create_blog_posts(self, blog_titles: List[str]):
         """Create blog posts"""
-        if blog_titles:
-            print(f"✍️ Creating {len(blog_titles)} blog posts...")
-            for title in blog_titles[:3]:  # Limit to 3
-                print(f"   📝 {title}")
-                time.sleep(0.3)
+        if not blog_titles:
+            return
+            
+        print(f"✍️ Creating {len(blog_titles)} blog posts...")
+        
+        # First, create a blog if it doesn't exist
+        blog_data = {
+            "blog": {
+                "title": "Store News & Updates",
+                "handle": "news"
+            }
+        }
+        
+        try:
+            # Check if blog exists or create it
+            blog_response = requests.get(f"{self.api_base}/blogs.json", headers=self.headers)
+            if blog_response.status_code == 200:
+                blogs = blog_response.json().get('blogs', [])
+                blog_id = blogs[0]['id'] if blogs else None
+                
+                if not blog_id:
+                    # Create blog
+                    create_blog_response = requests.post(
+                        f"{self.api_base}/blogs.json",
+                        headers=self.headers,
+                        json=blog_data
+                    )
+                    if create_blog_response.status_code == 201:
+                        blog_id = create_blog_response.json()['blog']['id']
+                    else:
+                        print("   ⚠️ Failed to create blog")
+                        return
+                
+                # Create blog posts
+                for title in blog_titles[:3]:  # Limit to 3
+                    print(f"   📝 {title}")
+                    
+                    post_data = {
+                        "article": {
+                            "title": title,
+                            "body_html": f"<p>Welcome to our latest update about {title.lower()}. We're excited to share this information with our customers.</p>",
+                            "published": True
+                        }
+                    }
+                    
+                    try:
+                        post_response = requests.post(
+                            f"{self.api_base}/blogs/{blog_id}/articles.json",
+                            headers=self.headers,
+                            json=post_data
+                        )
+                        
+                        if post_response.status_code != 201:
+                            print(f"   ⚠️ Failed to create blog post: {title}")
+                            
+                    except Exception as e:
+                        print(f"   ❌ Error creating blog post '{title}': {e}")
+                    
+                    time.sleep(0.3)  # Rate limiting
+                    
+        except Exception as e:
+            print(f"   ❌ API error with blog posts: {e}")
     
     def _customize_theme(self, concept: Dict):
         """Customize store theme"""
         print("🎨 Customizing theme colors and fonts...")
         # Theme customization API calls would go here
+    
+    def _add_product_image(self, product_id: int, product_name: str):
+        """Generate and upload an image for a product"""
+        try:
+            # Determine category for better image generation
+            category = self.image_generator._detect_category(product_name)
+            
+            # Generate image
+            image_bytes = self.image_generator.generate_product_image(product_name, category)
+            
+            if image_bytes:
+                # Create filename
+                safe_name = re.sub(r'[^a-zA-Z0-9\s]', '', product_name)
+                safe_name = re.sub(r'\s+', '_', safe_name).lower()
+                filename = f"{safe_name}_product_image.png"
+                
+                # Upload to Shopify
+                success = self.image_generator.upload_image_to_shopify(
+                    image_bytes, filename, str(product_id), 
+                    self.shop_domain, self.access_token
+                )
+                
+                if success:
+                    print(f"   🖼️ Added product image for {product_name}")
+                else:
+                    print(f"   ⚠️ Failed to upload image for {product_name}")
+            else:
+                print(f"   ⚠️ Failed to generate image for {product_name}")
+                
+        except Exception as e:
+            print(f"   ❌ Error adding image for {product_name}: {e}")
 
 
 def interactive_store_creator():

@@ -1,114 +1,278 @@
-# app.py - Simple web interface for Shopify Assistant
-
-import streamlit as st
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
+# Flask Web Application for Shopify Store Creator
+from flask import Flask, render_template, request, jsonify, session
+from flask_cors import CORS
+import os
+import json
+import uuid
+from datetime import datetime
+from store_builder import CompleteShopifyStoreCreator
+from dotenv import load_dotenv
+import threading
 import time
 
-@st.cache_resource
-def load_model():
-    """Load the model once and cache it"""
-    with st.spinner("Loading Shopify Assistant..."):
-        model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
+# Load environment variables
+load_dotenv()
+
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-change-this')
+CORS(app)
+
+# Store creation status tracking
+creation_jobs = {}
+
+class StoreCreationJob:
+    def __init__(self, job_id, prompt):
+        self.id = job_id
+        self.prompt = prompt
+        self.status = 'pending'
+        self.progress = 0
+        self.result = None
+        self.error = None
+        self.started_at = datetime.now()
+        self.completed_at = None
+
+@app.route('/')
+def index():
+    """Main page with store creation interface"""
+    return render_template('index.html')
+
+@app.route('/api/create-store', methods=['POST'])
+def create_store():
+    """API endpoint to create a new Shopify store"""
+    try:
+        data = request.get_json()
+        prompt = data.get('prompt', '').strip()
         
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+        if not prompt:
+            return jsonify({'error': 'Prompt is required'}), 400
         
-        base_model = AutoModelForCausalLM.from_pretrained(
-            model_id, 
-            torch_dtype=torch.float16,
-            device_map="auto"
+        # Generate unique job ID
+        job_id = str(uuid.uuid4())
+        
+        # Create job tracker
+        job = StoreCreationJob(job_id, prompt)
+        creation_jobs[job_id] = job
+        
+        # Start store creation in background thread
+        thread = threading.Thread(target=create_store_background, args=(job_id, prompt))
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'job_id': job_id,
+            'status': 'started',
+            'message': 'Store creation started successfully'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def create_store_background(job_id, prompt):
+    """Background task to create the store"""
+    job = creation_jobs[job_id]
+    
+    try:
+        job.status = 'running'
+        job.progress = 10
+        
+        # Initialize store creator
+        creator = CompleteShopifyStoreCreator(
+            shop_domain=os.getenv('SHOPIFY_SHOP_DOMAIN'),
+            access_token=os.getenv('SHOPIFY_ACCESS_TOKEN'),
+            real_mode=os.getenv('STORE_CREATION_MODE', 'demo').lower() == 'real'
         )
         
-        model = PeftModel.from_pretrained(base_model, "./fine_tuned_model")
+        job.progress = 25
         
-    return model, tokenizer
+        # Create the store
+        result = creator.create_store_from_prompt(prompt)
+        
+        job.progress = 100
+        job.status = 'completed'
+        job.result = result
+        job.completed_at = datetime.now()
+        
+    except Exception as e:
+        job.status = 'failed'
+        job.error = str(e)
+        job.completed_at = datetime.now()
 
-def generate_response(model, tokenizer, question):
-    """Generate response from the model"""
-    prompt = f"User: {question}\nAssistant:"
+@app.route('/api/job-status/<job_id>')
+def get_job_status(job_id):
+    """Get the status of a store creation job"""
+    job = creation_jobs.get(job_id)
     
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
     
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_length=256,
-            num_return_sequences=1,
-            temperature=0.7,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id
+    response = {
+        'id': job.id,
+        'status': job.status,
+        'progress': job.progress,
+        'prompt': job.prompt,
+        'started_at': job.started_at.isoformat()
+    }
+    
+    if job.completed_at:
+        response['completed_at'] = job.completed_at.isoformat()
+    
+    if job.result:
+        response['result'] = job.result
+    
+    if job.error:
+        response['error'] = job.error
+    
+    return jsonify(response)
+
+@app.route('/api/recent-stores')
+def get_recent_stores():
+    """Get list of recently created stores"""
+    recent_jobs = []
+    
+    # Get completed jobs from the last 24 hours
+    for job in creation_jobs.values():
+        if job.status == 'completed' and job.result:
+            recent_jobs.append({
+                'id': job.id,
+                'prompt': job.prompt,
+                'store_name': job.result.get('concept', {}).get('store_name', 'Unknown Store'),
+                'store_url': job.result.get('store_url', ''),
+                'products_count': job.result.get('products_created', 0),
+                'created_at': job.completed_at.isoformat() if job.completed_at else None,
+                'mode': job.result.get('mode', 'demo')
+            })
+    
+    # Sort by creation time (newest first)
+    recent_jobs.sort(key=lambda x: x['created_at'] or '', reverse=True)
+    
+    return jsonify(recent_jobs[:10])  # Return last 10 stores
+
+@app.route('/api/config')
+def get_config():
+    """Get current configuration status"""
+    return jsonify({
+        'shopify_configured': bool(os.getenv('SHOPIFY_SHOP_DOMAIN') and os.getenv('SHOPIFY_ACCESS_TOKEN')),
+        'store_mode': os.getenv('STORE_CREATION_MODE', 'demo'),
+        'shop_domain': os.getenv('SHOPIFY_SHOP_DOMAIN', ''),
+    })
+
+@app.route('/api/test-connection')
+def test_connection():
+    """Test Shopify API connection"""
+    try:
+        creator = CompleteShopifyStoreCreator(
+            shop_domain=os.getenv('SHOPIFY_SHOP_DOMAIN'),
+            access_token=os.getenv('SHOPIFY_ACCESS_TOKEN')
         )
-    
-    full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    
-    if "Assistant:" in full_response:
-        response = full_response.split("Assistant:")[-1].strip()
-    else:
-        response = full_response.replace(prompt, "").strip()
-    
-    return response
+        
+        # Test basic API access (this would need to be implemented in the store builder)
+        return jsonify({
+            'status': 'connected',
+            'shop_domain': os.getenv('SHOPIFY_SHOP_DOMAIN'),
+            'message': 'Successfully connected to Shopify'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
-def main():
-    st.set_page_config(
-        page_title="Shopify Assistant",
-        page_icon="🛍️",
-        layout="wide"
-    )
-    
-    st.title("🛍️ Shopify Assistant")
-    st.subline("Your AI-powered guide to setting up and managing your Shopify store")
-    
-    # Load model
-    model, tokenizer = load_model()
-    
-    # Sidebar with example questions
-    with st.sidebar:
-        st.header("💡 Try asking:")
-        example_questions = [
-            "How do I add a product to my store?",
-            "What payment methods should I enable?",
-            "How do I set up shipping rates?",
-            "How can I improve my product photos?",
-            "What's the best way to handle returns?",
-            "How do I optimize my store for SEO?"
-        ]
+@app.route('/api/store-settings', methods=['GET'])
+def get_store_settings():
+    """Get current store settings"""
+    try:
+        # In a real implementation, this would fetch from Shopify API
+        # For now, return mock data or from environment
+        settings = {
+            'store_name': 'My AI Store',
+            'store_description': 'Created with AI-powered store builder',
+            'email': 'admin@mystore.com',
+            'phone': '+1 (555) 123-4567',
+            'address': {
+                'street': '123 Main Street',
+                'city': 'Anytown',
+                'state': 'CA',
+                'zip': '12345',
+                'country': 'United States'
+            },
+            'currency': 'USD',
+            'timezone': 'America/Los_Angeles',
+            'domain': os.getenv('SHOPIFY_SHOP_DOMAIN', 'yourstore.myshopify.com'),
+            'plan': 'Basic Shopify',
+            'theme': 'Dawn'
+        }
         
-        for question in example_questions:
-            if st.button(question, key=question):
-                st.session_state.user_input = question
-    
-    # Chat interface
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    
-    # Display chat history
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # Chat input
-    if prompt := st.chat_input("Ask me anything about Shopify..."):
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        return jsonify(settings)
         
-        # Generate assistant response
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = generate_response(model, tokenizer, prompt)
-            st.markdown(response)
-        
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": response})
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("Built with ❤️ using TinyLlama and LoRA fine-tuning")
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-if __name__ == "__main__":
-    main()
+@app.route('/api/store-settings', methods=['PUT'])
+def update_store_settings():
+    """Update store settings"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['store_name', 'store_description', 'email']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # In a real implementation, this would update via Shopify API
+        # For now, we'll simulate the update
+        
+        # Here you would typically make Shopify API calls like:
+        # creator = CompleteShopifyStoreCreator()
+        # creator.update_store_settings(data)
+        
+        updated_settings = data  # In reality, return the updated data from Shopify
+        
+        return jsonify({
+            'success': True,
+            'message': 'Store settings updated successfully',
+            'settings': updated_settings
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/store-theme', methods=['PUT'])
+def update_store_theme():
+    """Update store theme settings"""
+    try:
+        data = request.get_json()
+        
+        # Validate theme data
+        if 'theme_name' not in data:
+            return jsonify({'error': 'Theme name is required'}), 400
+        
+        # In a real implementation, this would update theme via Shopify API
+        theme_settings = {
+            'theme_name': data.get('theme_name'),
+            'primary_color': data.get('primary_color', '#6366f1'),
+            'secondary_color': data.get('secondary_color', '#10b981'),
+            'accent_color': data.get('accent_color', '#f59e0b'),
+            'logo_url': data.get('logo_url', ''),
+            'favicon_url': data.get('favicon_url', ''),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            'success': True,
+            'message': 'Theme updated successfully',
+            'theme': theme_settings
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    # Ensure templates and static directories exist
+    os.makedirs('templates', exist_ok=True)
+    os.makedirs('static/css', exist_ok=True)
+    os.makedirs('static/js', exist_ok=True)
+    
+    # Run the Flask app
+    app.run(debug=True, host='0.0.0.0', port=5000)

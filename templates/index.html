@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Shopify Store Creator</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-store"></i>
+                    <h1>AI Store Creator</h1>
+                </div>
+                <div class="connection-status" id="connectionStatus">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <span id="statusText">Checking connection...</span>
+                </div>
+                <div class="header-actions">
+                    <button class="settings-btn" id="settingsBtn">
+                        <i class="fas fa-cog"></i>
+                        Settings
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Store Creation Section -->
+            <section class="creation-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-magic"></i> Create Your Store</h2>
+                    <p>Describe your store idea and let AI create a complete Shopify store for you</p>
+                </div>
+
+                <form id="storeCreationForm" class="creation-form">
+                    <div class="form-group">
+                        <label for="storePrompt">
+                            <i class="fas fa-lightbulb"></i>
+                            What kind of store do you want to create?
+                        </label>
+                        <textarea 
+                            id="storePrompt" 
+                            name="prompt" 
+                            placeholder="e.g., Create a store that sells premium water bottles with 30oz capacity, make sure there's 70 in stock"
+                            rows="4"
+                            required
+                        ></textarea>
+                        <div class="form-hint">
+                            Be specific about products, quantities, colors, sizes, or any other details you want
+                        </div>
+                    </div>
+
+                    <button type="submit" class="create-btn" id="createBtn">
+                        <i class="fas fa-rocket"></i>
+                        Create Store with AI
+                    </button>
+                </form>
+
+                <!-- Examples Section -->
+                <div class="examples-section">
+                    <h3><i class="fas fa-examples"></i> Example Prompts</h3>
+                    <div class="examples-grid">
+                        <div class="example-card" onclick="useExample('Create a store that sells premium water bottles with 30oz capacity, make sure there\'s 70 in stock')">
+                            <i class="fas fa-tint"></i>
+                            <p>Premium water bottles with specific inventory</p>
+                        </div>
+                        <div class="example-card" onclick="useExample('I want a store selling speed cubes for speedcubing competitions')">
+                            <i class="fas fa-cube"></i>
+                            <p>Speed cubes for competitions</p>
+                        </div>
+                        <div class="example-card" onclick="useExample('Create a store that sells organic coffee beans from different regions')">
+                            <i class="fas fa-coffee"></i>
+                            <p>Organic coffee from various regions</p>
+                        </div>
+                        <div class="example-card" onclick="useExample('Build a store for eco-friendly yoga mats and meditation accessories')">
+                            <i class="fas fa-leaf"></i>
+                            <p>Eco-friendly yoga and meditation products</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress Section -->
+            <section class="progress-section" id="progressSection" style="display: none;">
+                <div class="progress-card">
+                    <h3><i class="fas fa-cog fa-spin"></i> Creating Your Store</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">Starting store creation...</div>
+                    <div class="progress-details" id="progressDetails">
+                        <div class="detail-item">
+                            <i class="fas fa-brain"></i>
+                            <span>AI analyzing your request</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-box"></i>
+                            <span>Generating products</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-store"></i>
+                            <span>Building store structure</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-paint-brush"></i>
+                            <span>Customizing design</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <div class="results-card">
+                    <div class="results-header">
+                        <h3><i class="fas fa-check-circle"></i> Store Created Successfully!</h3>
+                        <div class="results-actions">
+                            <button class="action-btn view-btn" id="viewStoreBtn">
+                                <i class="fas fa-external-link-alt"></i>
+                                View Store
+                            </button>
+                            <button class="action-btn admin-btn" id="adminBtn">
+                                <i class="fas fa-cog"></i>
+                                Admin Panel
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="store-details" id="storeDetails">
+                        <!-- Store details will be populated by JavaScript -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recent Stores Section -->
+            <section class="recent-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-history"></i> Recent Stores</h2>
+                    <button class="refresh-btn" id="refreshRecent">
+                        <i class="fas fa-sync-alt"></i>
+                        Refresh
+                    </button>
+                </div>
+                <div class="recent-stores" id="recentStores">
+                    <!-- Recent stores will be populated by JavaScript -->
+                </div>
+            </section>
+        </main>
+
+        <!-- Store Settings Modal -->
+        <div class="modal" id="settingsModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2><i class="fas fa-cog"></i> Store Settings</h2>
+                    <button class="close-btn" id="closeSettingsModal">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div class="modal-body">
+                    <div class="settings-tabs">
+                        <button class="tab-btn active" data-tab="general">
+                            <i class="fas fa-store"></i>
+                            General
+                        </button>
+                        <button class="tab-btn" data-tab="theme">
+                            <i class="fas fa-palette"></i>
+                            Theme
+                        </button>
+                        <button class="tab-btn" data-tab="contact">
+                            <i class="fas fa-address-card"></i>
+                            Contact
+                        </button>
+                    </div>
+
+                    <!-- General Settings Tab -->
+                    <div class="tab-content active" id="general-tab">
+                        <form id="generalSettingsForm" class="settings-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="storeName">
+                                        <i class="fas fa-store"></i>
+                                        Store Name
+                                    </label>
+                                    <input type="text" id="storeName" name="store_name" placeholder="My Awesome Store" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="storeDomain">
+                                        <i class="fas fa-globe"></i>
+                                        Store Domain
+                                    </label>
+                                    <input type="text" id="storeDomain" name="domain" placeholder="mystore.myshopify.com" readonly>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="storeDescription">
+                                    <i class="fas fa-align-left"></i>
+                                    Store Description
+                                </label>
+                                <textarea id="storeDescription" name="store_description" rows="3" placeholder="Describe your store..."></textarea>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="currency">
+                                        <i class="fas fa-dollar-sign"></i>
+                                        Currency
+                                    </label>
+                                    <select id="currency" name="currency">
+                                        <option value="USD">USD - US Dollar</option>
+                                        <option value="EUR">EUR - Euro</option>
+                                        <option value="GBP">GBP - British Pound</option>
+                                        <option value="CAD">CAD - Canadian Dollar</option>
+                                        <option value="AUD">AUD - Australian Dollar</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="timezone">
+                                        <i class="fas fa-clock"></i>
+                                        Timezone
+                                    </label>
+                                    <select id="timezone" name="timezone">
+                                        <option value="America/Los_Angeles">Pacific Time</option>
+                                        <option value="America/Denver">Mountain Time</option>
+                                        <option value="America/Chicago">Central Time</option>
+                                        <option value="America/New_York">Eastern Time</option>
+                                        <option value="UTC">UTC</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Theme Settings Tab -->
+                    <div class="tab-content" id="theme-tab">
+                        <form id="themeSettingsForm" class="settings-form">
+                            <div class="form-group">
+                                <label for="themeName">
+                                    <i class="fas fa-paint-brush"></i>
+                                    Theme
+                                </label>
+                                <select id="themeName" name="theme_name">
+                                    <option value="Dawn">Dawn</option>
+                                    <option value="Refresh">Refresh</option>
+                                    <option value="Studio">Studio</option>
+                                    <option value="Sense">Sense</option>
+                                    <option value="Craft">Craft</option>
+                                </select>
+                            </div>
+
+                            <div class="color-settings">
+                                <h4><i class="fas fa-palette"></i> Color Scheme</h4>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="primaryColor">Primary Color</label>
+                                        <div class="color-input-group">
+                                            <input type="color" id="primaryColor" name="primary_color" value="#6366f1">
+                                            <input type="text" class="color-text" value="#6366f1" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="secondaryColor">Secondary Color</label>
+                                        <div class="color-input-group">
+                                            <input type="color" id="secondaryColor" name="secondary_color" value="#10b981">
+                                            <input type="text" class="color-text" value="#10b981" readonly>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="accentColor">Accent Color</label>
+                                        <div class="color-input-group">
+                                            <input type="color" id="accentColor" name="accent_color" value="#f59e0b">
+                                            <input type="text" class="color-text" value="#f59e0b" readonly>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="logoUrl">
+                                    <i class="fas fa-image"></i>
+                                    Logo URL
+                                </label>
+                                <input type="url" id="logoUrl" name="logo_url" placeholder="https://example.com/logo.png">
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Contact Settings Tab -->
+                    <div class="tab-content" id="contact-tab">
+                        <form id="contactSettingsForm" class="settings-form">
+                            <div class="form-group">
+                                <label for="storeEmail">
+                                    <i class="fas fa-envelope"></i>
+                                    Store Email
+                                </label>
+                                <input type="email" id="storeEmail" name="email" placeholder="admin@mystore.com" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="storePhone">
+                                    <i class="fas fa-phone"></i>
+                                    Phone Number
+                                </label>
+                                <input type="tel" id="storePhone" name="phone" placeholder="+1 (555) 123-4567">
+                            </div>
+
+                            <div class="address-section">
+                                <h4><i class="fas fa-map-marker-alt"></i> Store Address</h4>
+                                <div class="form-group">
+                                    <label for="street">Street Address</label>
+                                    <input type="text" id="street" name="address.street" placeholder="123 Main Street">
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="city">City</label>
+                                        <input type="text" id="city" name="address.city" placeholder="Anytown">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="state">State</label>
+                                        <input type="text" id="state" name="address.state" placeholder="CA">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="zip">ZIP Code</label>
+                                        <input type="text" id="zip" name="address.zip" placeholder="12345">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="country">Country</label>
+                                        <select id="country" name="address.country">
+                                            <option value="United States">United States</option>
+                                            <option value="Canada">Canada</option>
+                                            <option value="United Kingdom">United Kingdom</option>
+                                            <option value="Australia">Australia</option>
+                                            <option value="Germany">Germany</option>
+                                            <option value="France">France</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button class="cancel-btn" id="cancelSettings">Cancel</button>
+                    <button class="save-btn" id="saveSettings">
+                        <i class="fas fa-save"></i>
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Overlay -->
+        <div class="modal-overlay" id="modalOverlay"></div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

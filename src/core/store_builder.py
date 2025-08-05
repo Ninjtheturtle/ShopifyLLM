@@ -13,8 +13,8 @@ import re
 # Add the parent directory to the path to import from src
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.market_research import MarketResearcher
+from services.image_generator import ProductImageGenerator
 from dotenv import load_dotenv
-from image_generator import ProductImageGenerator
 
 # Load environment variables
 load_dotenv()
@@ -82,7 +82,7 @@ class CompleteShopifyStoreCreator:
         """Use our trained AI model to generate store concept"""
         try:
             # Import our trained model
-            from chat_assistant import ShopifyAssistant
+            from services.chat_assistant import ShopifyAssistant
             
             assistant = ShopifyAssistant()
             response = assistant.respond(prompt)

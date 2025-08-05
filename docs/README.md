@@ -24,27 +24,38 @@ A revolutionary system that combines a fine-tuned language model with Shopify AP
 
 ```
 ShopifyLLM/
-├── 🤖 AI & Training
-│   ├── chat_assistant.py           # Main AI model interface
-│   ├── train.py                    # Model training script
-│   ├── start_training.py           # Training orchestrator
-│   ├── validate_dataset.py         # Data validation
-│   └── comprehensive_shopify_data.jsonl # Training data (110 examples)
-├── �️ Store Creation
-│   ├── store_builder.py            # Complete automated store creator
-│   └── run_store_creator.py        # Interactive store creation interface
-├── � Setup & Configuration
-│   ├── shopify_config.py           # Credential setup helper
-│   ├── test_shopify_connection.py  # API connection testing
-│   ├── SHOPIFY_SETUP.md           # Setup documentation
-│   └── .env                       # Shopify credentials (secure)
-├── � Trained Model
-│   ├── shopify_llama_8b_finetuned/ # Your trained model
-│   └── shopify_llama_8b_results/   # Training checkpoints
-└── � Testing
-    └── test_ai_response.py         # AI response testing
-```
-└── 🗂️ results/            # Training checkpoints and logs
+├── src/                            # Source code (organized by industry standards)
+│   ├── api/                       # Flask web application
+│   │   └── app.py                 # Main web server
+│   ├── core/                      # Core business logic
+│   │   └── store_builder.py       # Complete automated store creator
+│   ├── services/                  # External service integrations
+│   │   ├── chat_assistant.py      # AI model interface
+│   │   ├── market_research.py     # Market analysis
+│   │   └── image_generator.py     # Product image generation
+│   ├── config/                    # Configuration management
+│   │   ├── config.py              # Application configuration
+│   │   └── shopify_config.py      # Shopify API settings
+│   └── utils/                     # Utility functions
+│       ├── check_inventory.py     # Inventory management
+│       ├── check_products.py      # Product validation
+│       └── clean_store.py         # Store cleanup
+├── tests/                         # Test suite
+│   ├── unit/                      # Unit tests
+│   └── integration/               # Integration tests
+├── scripts/                       # Training and utility scripts
+│   ├── start_training.py          # Training orchestrator
+│   ├── train.py                   # Model training script
+│   ├── validate_dataset.py        # Data validation
+│   └── run_store_creator.py       # Store creation script
+├── static/                        # Web assets
+│   ├── css/                       # Stylesheets
+│   └── js/                        # JavaScript
+├── templates/                     # HTML templates
+├── docs/                          # Documentation
+├── main.py                        # Application entry point
+├── requirements.txt               # Python dependencies
+└── setup.py                       # Package configuration
 ```
 
 ## 🛠️ Installation

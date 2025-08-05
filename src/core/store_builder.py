@@ -5,19 +5,15 @@ import requests
 import json
 import time
 import os
+import sys
 from typing import Dict, List, Optional
 import random
 import re
 
-import requests
-import json
-import time
-import random
-import re
-from typing import Dict, List
-import os
+# Add the parent directory to the path to import from src
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from services.market_research import MarketResearcher
 from dotenv import load_dotenv
-from market_research import MarketResearcher
 from image_generator import ProductImageGenerator
 
 # Load environment variables

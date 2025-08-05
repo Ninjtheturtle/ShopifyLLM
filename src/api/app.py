@@ -5,15 +5,24 @@ import os
 import json
 import uuid
 from datetime import datetime
-from store_builder import CompleteShopifyStoreCreator
-from dotenv import load_dotenv
+import sys
 import threading
 import time
+
+# Add the parent directory to the path to import from src
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.store_builder import CompleteShopifyStoreCreator
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
+# Get the project root directory (two levels up from src/api/)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+app = Flask(__name__, 
+           template_folder=os.path.join(project_root, 'templates'),
+           static_folder=os.path.join(project_root, 'static'))
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-change-this')
 CORS(app)
 

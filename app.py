@@ -270,7 +270,7 @@ def update_store_theme():
 
 @app.route('/api/products', methods=['GET'])
 def list_products():
-    """Get list of all products from Shopify store"""
+    """Get list of all products from Shopify store - showing actual current prices"""
     try:
         # Initialize store creator to access Shopify API
         creator = CompleteShopifyStoreCreator()
@@ -278,7 +278,7 @@ def list_products():
         if not creator.real_mode or not creator.access_token:
             return jsonify({'error': 'Shopify credentials not configured'}), 400
         
-        # Fetch products from Shopify
+        # Fetch products from Shopify - these are the ACTUAL current prices
         products = creator._get_all_products()
         
         return jsonify({
@@ -370,6 +370,40 @@ def edit_product_with_ai():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/smart-edit', methods=['POST'])
+def smart_edit_product():
+    """Smart product editing - finds product by name and applies changes"""
+    try:
+        data = request.get_json()
+        prompt = data.get('prompt', '').strip()
+        
+        if not prompt:
+            return jsonify({'error': 'Prompt is required'}), 400
+        
+        # Generate unique job ID for editing
+        job_id = str(uuid.uuid4())
+        
+        # Create job for tracking
+        job = StoreCreationJob(job_id, f"Smart Edit: {prompt}")
+        creation_jobs[job_id] = job
+        
+        # Start editing in background thread
+        thread = threading.Thread(
+            target=smart_edit_worker,
+            args=(job_id, prompt)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'message': 'Smart product editing started'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 def edit_product_worker(job_id: str, product_id: str, prompt: str):
     """Background worker for editing products with AI"""
     job = creation_jobs.get(job_id)
@@ -424,6 +458,76 @@ def edit_product_worker(job_id: str, product_id: str, prompt: str):
             'product_id': product_id,
             'updated_product': updated_product,
             'message': 'Product updated successfully'
+        }
+        job.completed_at = datetime.now()
+        
+    except Exception as e:
+        job.status = 'failed'
+        job.error = str(e)
+        job.completed_at = datetime.now()
+
+def smart_edit_worker(job_id: str, prompt: str):
+    """Background worker for smart product editing - finds product and applies changes"""
+    job = creation_jobs.get(job_id)
+    if not job:
+        return
+    
+    try:
+        job.status = 'running'
+        job.progress = 10
+        
+        # Initialize store creator
+        creator = CompleteShopifyStoreCreator()
+        
+        if not creator.real_mode or not creator.access_token:
+            job.status = 'failed'
+            job.error = 'Shopify credentials not configured'
+            return
+        
+        job.progress = 20
+        
+        # Find the product to edit based on the prompt
+        target_product = creator._identify_product_from_prompt(prompt)
+        if not target_product:
+            job.status = 'failed'
+            job.error = 'Could not identify which product to edit from the prompt. Try being more specific about the product name.'
+            return
+        
+        job.progress = 40
+        product_id = str(target_product['id'])
+        
+        # Parse editing instructions from prompt
+        updates = creator._parse_product_edit_prompt(prompt, target_product)
+        
+        if not updates:
+            job.status = 'failed'
+            job.error = 'Could not understand what changes to make. Try being more specific.'
+            return
+        
+        job.progress = 60
+        
+        # Apply updates
+        updated_product = creator._update_product(product_id, updates)
+        
+        job.progress = 80
+        
+        # Generate new image if needed
+        if updates.get('generate_new_image'):
+            image_url = creator._generate_and_upload_product_image(
+                updated_product.get('title', ''), 
+                product_id
+            )
+            if image_url:
+                creator._update_product_image(product_id, image_url)
+        
+        job.progress = 100
+        job.status = 'completed'
+        job.result = {
+            'product_id': product_id,
+            'original_title': target_product.get('title'),
+            'updated_product': updated_product,
+            'changes_made': updates,
+            'message': f'Successfully updated {target_product.get("title")}'
         }
         job.completed_at = datetime.now()
         

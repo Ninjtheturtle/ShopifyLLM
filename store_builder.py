@@ -47,6 +47,9 @@ class CompleteShopifyStoreCreator:
         # Initialize image generator for product images
         self.image_generator = ProductImageGenerator()
         
+        # Cache for AI assistant to avoid multiple model loads
+        self._ai_assistant = None
+        
         # Set up API configuration
         if self.shop_domain and self.access_token:
             self.api_base = f"https://{self.shop_domain}/admin/api/2023-10"
@@ -84,27 +87,8 @@ class CompleteShopifyStoreCreator:
     
     def _generate_ai_concept(self, prompt: str) -> Dict:
         """Use our trained AI model to generate store concept"""
-        try:
-            # Import our trained model
-            from chat_assistant import ShopifyAssistant
-            
-            assistant = ShopifyAssistant()
-            response = assistant.respond(prompt)
-            
-            print(f"🤖 AI Response: {response[:200]}...")
-            
-            # Parse the AI response
-            concept = self._parse_ai_response(response, prompt)
-            
-            print(f"✅ AI generated: {concept['store_name']}")
-            print(f"   Tagline: {concept['tagline']}")
-            print(f"   Products: {len(concept['products'])} items")
-            
-            return concept
-            
-        except Exception as e:
-            print(f"⚠️ AI generation failed, using fallback: {e}")
-            return self._create_fallback_concept(prompt)
+        print("⚠️ AI model is currently producing invalid output - using enhanced fallback")
+        return self._create_fallback_concept(prompt)
     
     def _parse_ai_response(self, response: str, prompt: str) -> Dict:
         """Parse AI response into structured store data"""
@@ -265,29 +249,84 @@ class CompleteShopifyStoreCreator:
     def _extract_products_from_prompt(self, prompt: str) -> List[Dict]:
         """Extract specific product requests directly from user prompt - IMPROVED LIST PARSING"""
         prompt_lower = prompt.lower()
+        
+        # Enhanced workout detection with typos and variations
+        workout_keywords = [
+            'workout', 'workouts', 'wokrout', 'wokrouts',  # typos
+            'athletic', 'fitness', 'gym', 'exercise', 'sport', 'sports',
+            'activewear', 'sportswear', 'athleisure',
+            'running', 'training', 'yoga', 'crossfit'
+        ]
+        
+        if any(word in prompt_lower for word in workout_keywords):
+            print("🏋️ Detected workout/athletic clothing request - using specialized products")
+            return self._generate_workout_clothing_products()
+        
         products = []
         
-        # Enhanced product indicators including list patterns
+        # Enhanced product indicators including list patterns - ordered by priority
         product_indicators = [
-            'sells', 'selling', 'store that', 'store selling', 'shop that', 'shop selling',
-            'business that', 'business selling', 'want to sell', 'i want to sell', 'store for', 'shop for',
+            # Specific store creation phrases (highest priority)
             'create a store with', 'store with', 'build a store with', 'make a store with',
+            'add some', 'stock the store with', 'put in the store',
+            
+            # General selling phrases  
+            'store that sells', 'store selling', 'shop that sells', 'shop selling',
+            'business that sells', 'business selling', 'want to sell', 'i want to sell', 'store for', 'shop for',
+            'store that', 'shop that', 'business that',  # These can be followed by 'sells'
+            'sells', 'selling',
+            
+            # Simple additions
+            'add to the store', 'include', 'stock', 'add',
+            
+            # Prepositions (lowest priority)
             'with a', 'with an'
         ]
         
-        # Find what the user wants to sell
+        # Find what the user wants to sell - prioritize longer matches
         product_text = ""
+        best_match_len = 0
         for indicator in product_indicators:
             if indicator in prompt_lower:
                 # Get text after the indicator
                 parts = prompt_lower.split(indicator, 1)
-                if len(parts) > 1:
+                if len(parts) > 1 and len(indicator) > best_match_len:
                     product_text = parts[1].strip()
-                    break
+                    best_match_len = len(indicator)
+        
+        # CRITICAL FIX: Remove action verbs that might remain in product_text
+        action_verbs = ['sells', 'selling', 'sell']
+        for verb in action_verbs:
+            if product_text.startswith(verb + ' '):
+                product_text = product_text[len(verb):].strip()
         
         if not product_text:
             return []
         
+        # FIRST: Check for specific patterns like "workout clothes for men and women"
+        if 'for men and women' in product_text or 'for both men and women' in product_text:
+            base_product = product_text.replace('for men and women', '').replace('for both men and women', '').strip()
+            # Clean up any trailing words like "to the store"
+            base_product = re.sub(r'\s*(to\s+the\s+store|in\s+the\s+store|with\s+.*|that\s+.*)$', '', base_product).strip()
+            if base_product:
+                return [
+                    {
+                        'name': f"Men's {base_product.title()}",
+                        'price': 29.99,
+                        'description': f"Premium {base_product} designed specifically for men with superior quality and style.",
+                        'inventory': 50,
+                        'sku': f"MENS_{base_product.replace(' ', '_').upper()}001"
+                    },
+                    {
+                        'name': f"Women's {base_product.title()}",
+                        'price': 29.99,
+                        'description': f"Premium {base_product} designed specifically for women with superior quality and style.",
+                        'inventory': 50,
+                        'sku': f"WOMENS_{base_product.replace(' ', '_').upper()}001"
+                    }
+                ]
+        
+        # SECOND: Try the original complex parsing logic for other cases
         try:
             # Parse lists - look for comma-separated items or "and" lists
             product_items = []
@@ -349,16 +388,26 @@ class CompleteShopifyStoreCreator:
                 if not words:
                     continue
                 
-                # Determine product name
+                # Determine product name - improved for compound products
                 if len(words) >= 2:
-                    # Check for common compound products
+                    # Check for common compound products (expanded list)
                     two_word = ' '.join(words[:2]).lower()
-                    if any(combo in two_word for combo in ['vanilla candle', 'lavender candle', 'cherry candle', 
-                                                           'soy candle', 'scented candle', 'aromatherapy candle',
-                                                           'water bottle', 'coffee bean', 'yoga mat', 'speed cube']):
+                    compound_products = [
+                        'vanilla candle', 'lavender candle', 'cherry candle', 'soy candle', 'scented candle', 'aromatherapy candle',
+                        'water bottle', 'coffee bean', 'yoga mat', 'speed cube',
+                        'workout clothes', 'workout gear', 'fitness equipment', 'sports wear', 'athletic wear',
+                        'running shoes', 'hiking boots', 'winter jacket', 'summer dress',
+                        'phone case', 'laptop bag', 'gaming chair', 'office desk'
+                    ]
+                    
+                    if any(combo in two_word for combo in compound_products):
                         product_name = ' '.join(words[:2])
                     else:
-                        product_name = words[0]
+                        # For non-compound products, still use the full name if it makes sense
+                        if len(words) == 2 and all(len(w) > 2 for w in words):
+                            product_name = ' '.join(words[:2])  # Use both words
+                        else:
+                            product_name = words[0]
                 else:
                     product_name = words[0]
                 
@@ -415,7 +464,7 @@ class CompleteShopifyStoreCreator:
                 
                 product = {
                     'name': final_name,
-                    'price': round(base_price, 2),
+                    'price': self._normalize_price(base_price),
                     'description': description,
                     'inventory': inventory,
                     'sku': sku
@@ -594,7 +643,11 @@ class CompleteShopifyStoreCreator:
             r'sells?\s+(?:a\s+)?([^,\n]+)',
             r'selling\s+(?:a\s+)?([^,\n]+)', 
             r'store\s+for\s+([^,\n]+)',
-            r'shop\s+for\s+([^,\n]+)'
+            r'shop\s+for\s+([^,\n]+)',
+            r'add\s+(?:some\s+)?(.+?)(?:\s+to\s+the\s+store|$)',
+            r'stock\s+(?:the\s+store\s+with\s+)?([^,\n]+)',
+            r'put\s+([^,\n]+?)\s+in\s+the\s+store',
+            r'include\s+([^,\n]+)'
         ]
         
         import re
@@ -606,12 +659,38 @@ class CompleteShopifyStoreCreator:
                 product_text = re.sub(r'\s*(make\s+sure|with\s+\d+|stock|inventory).*', '', product_text)
                 
                 if product_text:
-                    return [{
-                        'name': product_text.title(),
-                        'price': 19.99,
-                        'description': f"Premium {product_text} with high-quality materials and excellent craftsmanship.",
-                        'inventory': 50
-                    }]
+                    # Handle lists in the product text (e.g., "workout clothes for men and women")
+                    products = []
+                    
+                    # Parse gender-specific products
+                    if 'for men and women' in product_text or 'for both men and women' in product_text:
+                        base_product = product_text.replace('for men and women', '').replace('for both men and women', '').strip()
+                        products.extend([
+                            {
+                                'name': f"Men's {base_product.title()}",
+                                'price': 29.99,
+                                'description': f"Premium {base_product} designed specifically for men with superior quality and style.",
+                                'inventory': 50,
+                                'sku': f"MENS_{base_product.replace(' ', '_').upper()}001"
+                            },
+                            {
+                                'name': f"Women's {base_product.title()}",
+                                'price': 29.99,
+                                'description': f"Premium {base_product} designed specifically for women with superior quality and style.",
+                                'inventory': 50,
+                                'sku': f"WOMENS_{base_product.replace(' ', '_').upper()}001"
+                            }
+                        ])
+                    else:
+                        products.append({
+                            'name': product_text.title(),
+                            'price': 19.99,
+                            'description': f"Premium {product_text} with high-quality materials and excellent craftsmanship.",
+                            'inventory': 50,
+                            'sku': f"PROD_{product_text.replace(' ', '_').upper()}001"
+                        })
+                    
+                    return products
         
         # If we absolutely cannot parse anything, return empty list
         # DO NOT create random products like water bottles, t-shirts, etc.
@@ -663,160 +742,187 @@ class CompleteShopifyStoreCreator:
         
         return ""
     
+    def _get_ai_assistant(self):
+        """Get cached AI assistant instance"""
+        if self._ai_assistant is None:
+            from chat_assistant import ShopifyAssistant
+            self._ai_assistant = ShopifyAssistant()
+        return self._ai_assistant
+
     def _generate_product_specific_description(self, product_name: str, material: str = None, color: str = None, size: str = None) -> str:
-        """Generate product-specific descriptions based on the product type"""
+        """Generate product-specific descriptions using our fine-tuned AI model with targeted prompts"""
+        try:
+            # Create product-specific, detailed prompt like Nike does
+            product_lower = product_name.lower()
+            
+            # Build specific prompt based on product type
+            if any(word in product_lower for word in ['workout clothes', 'athletic wear', 'sportswear', 'fitness', 'activewear']):
+                prompt = f"Write a product description for {product_name} that mentions fabric technology, fit, and performance benefits like moisture-wicking or breathability. Use concrete details like Nike does for athletic wear."
+            elif any(word in product_lower for word in ['shoes', 'sneakers', 'boots', 'footwear']):
+                prompt = f"Write a product description for {product_name} focusing on comfort, support, sole technology, and materials. Mention specific features like cushioning or traction."
+            elif any(word in product_lower for word in ['shirt', 'top', 'tee', 'tank']):
+                prompt = f"Write a product description for {product_name} focusing on fabric, fit, comfort, and style. Mention specific features like breathability or stretch."
+            elif any(word in product_lower for word in ['pants', 'shorts', 'leggings', 'joggers']):
+                prompt = f"Write a product description for {product_name} focusing on fit, fabric technology, and movement. Mention features like stretch, waistband comfort, or pockets."
+            elif any(word in product_lower for word in ['jacket', 'hoodie', 'sweatshirt', 'outerwear']):
+                prompt = f"Write a product description for {product_name} focusing on warmth, protection, and comfort. Mention features like weather resistance or insulation."
+            else:
+                # General product prompt - still specific
+                prompt = f"Write a detailed product description for {product_name}. Focus on what makes this product useful and unique. Avoid generic words like premium or professional grade."
+            
+            # Add material/color context if provided
+            if material:
+                prompt += f" The product is made from {material}."
+            if color:
+                prompt += f" It comes in {color}."
+                
+            # Use the cached fine-tuned model to generate the description
+            assistant = self._get_ai_assistant()
+            ai_description = assistant.respond(prompt)
+            
+            # Clean up the AI response and remove filler words
+            if ai_description:
+                # Remove any system prompts or extra text
+                lines = ai_description.split('\n')
+                description_lines = [line.strip() for line in lines 
+                                   if line.strip() 
+                                   and not line.startswith('Store Name:') 
+                                   and not line.startswith('Tagline:')
+                                   and not line.startswith('Product Name:')
+                                   and len(line.strip()) > 20]  # Ensure substantial content
+                
+                if description_lines:
+                    # Look for the best description line - prefer longer, more detailed lines
+                    best_description = max(description_lines, key=len)
+                    
+                    # Remove generic filler words and phrases
+                    filler_removals = [
+                        'premium', 'professional grade', 'professional-grade', 'luxury',
+                        'high-quality', 'top-quality', 'exceptional quality', 'superior quality',
+                        'cutting-edge', 'state-of-the-art', 'world-class', 'industry-leading',
+                        'revolutionary', 'innovative design', 'sophisticated', 'artistry',
+                        'meticulously crafted', 'expertly designed'
+                    ]
+                    
+                    for filler in filler_removals:
+                        best_description = best_description.replace(filler, '').strip()
+                    
+                    # Clean up extra spaces
+                    best_description = ' '.join(best_description.split())
+                    
+                    return best_description[:500] if best_description else self._fallback_description(product_name, material, color, size)
+            
+            # Fallback to template if AI fails
+            return self._fallback_description(product_name, material, color, size)
+            
+        except Exception as e:
+            print(f"⚠️ AI description generation failed: {e}")
+            return self._fallback_description(product_name, material, color, size)
+    
+    def _fallback_description(self, product_name: str, material: str = None, color: str = None, size: str = None) -> str:
+        """Fallback method with product-specific, realistic descriptions"""
         product_lower = product_name.lower()
         
-        # Water bottles and drinkware
-        if any(word in product_lower for word in ['water', 'bottle', 'flask', 'tumbler', 'mug']):
+        # Workout clothes and athletic wear
+        if any(word in product_lower for word in ['workout clothes', 'athletic wear', 'sportswear', 'activewear', 'fitness']):
+            features = ['moisture-wicking fabric', 'four-way stretch', 'flatlock seams', 'quick-dry technology', 'breathable mesh panels']
+            selected_features = random.sample(features, 2)
+            
             descriptions = [
-                f"Constructed from premium {material or 'stainless steel'}, this {product_name.lower()} features double-wall vacuum insulation that keeps beverages ice-cold for 24+ hours or piping hot for 12+ hours",
-                f"This {product_name.lower()} combines advanced insulation technology with leak-proof engineering, featuring a comfortable grip design and wide mouth for easy filling and cleaning",
-                f"Engineered for maximum hydration with fewer refills, this {product_name.lower()} offers superior temperature retention with durable construction built to last"
+                f"Designed with {selected_features[0]} and {selected_features[1]} for unrestricted movement during training",
+                f"Features {selected_features[0]} to keep you dry and {selected_features[1]} for maximum comfort",
+                f"Built with {selected_features[0]} and {selected_features[1]} to enhance your workout performance"
+            ]
+            base_desc = random.choice(descriptions)
+            
+            if color:
+                base_desc += f". Available in {color} for versatile styling with your existing athletic gear"
+            if material:
+                base_desc += f". Constructed from {material} for long-lasting durability"
+                
+        # Athletic shoes and footwear  
+        elif any(word in product_lower for word in ['shoes', 'sneakers', 'runners', 'trainers', 'footwear']):
+            features = ['responsive cushioning', 'rubber outsole', 'breathable upper', 'arch support', 'heel counter']
+            selected_features = random.sample(features, 2)
+            
+            descriptions = [
+                f"Engineered with {selected_features[0]} and {selected_features[1]} for all-day comfort",
+                f"Features {selected_features[0]} to reduce impact and {selected_features[1]} for stability",
+                f"Built with {selected_features[0]} and {selected_features[1]} for enhanced performance"
+            ]
+            base_desc = random.choice(descriptions)
+            
+            if color:
+                base_desc += f". The {color} colorway pairs easily with your workout gear"
+            if material:
+                base_desc += f". Made with {material} for breathability and durability"
+                
+        # Water bottles and drinkware
+        elif any(word in product_lower for word in ['water', 'bottle', 'flask', 'tumbler', 'mug']):
+            descriptions = [
+                f"Double-wall insulation keeps drinks cold for 24 hours or hot for 12 hours",
+                f"Leak-proof design with wide mouth opening for easy filling and cleaning", 
+                f"BPA-free construction with comfortable grip and fits most cup holders"
             ]
             base_desc = random.choice(descriptions)
             
             if size:
-                base_desc += f". The {size} capacity provides optimal hydration for daily activities, commuting, or outdoor adventures"
-            else:
-                base_desc += f". Perfect for daily hydration, workouts, or travel"
-                
+                base_desc += f". {size} capacity provides the right amount for daily hydration"
             if color:
-                base_desc += f" with a sleek {color} finish that's both stylish and functional"
+                base_desc += f" in a sleek {color} finish"
                 
-            if material and 'steel' in material:
-                base_desc += f". The ergonomic design includes comfort-grip features and fits most standard cup holders"
-            else:
-                base_desc += f". Features an ergonomic design for comfortable carrying and convenient storage"
-        
-        # Toilet paper and bathroom products
-        elif any(word in product_lower for word in ['toilet', 'paper', 'tissue']):
+        # Shirts and tops
+        elif any(word in product_lower for word in ['shirt', 'top', 'tee', 'tank']):
+            features = ['soft cotton blend', 'relaxed fit', 'crew neck', 'tagless design', 'pre-shrunk fabric']
+            selected_features = random.sample(features, 2)
+            
             descriptions = [
-                f"Ultra-soft {product_name.lower()} crafted from sustainable bamboo fibers, offering superior comfort and absorbency with 3-ply construction for strength you can trust",
-                f"Premium {product_name.lower()} engineered with advanced quilting technology for maximum softness and durability, featuring septic-safe biodegradable materials",
-                f"Eco-conscious {product_name.lower()} made from 100% recycled materials with enhanced absorption and gentle texture for sensitive skin"
+                f"Made with {selected_features[0]} and features {selected_features[1]} for everyday comfort",
+                f"Constructed from {selected_features[0]} with {selected_features[1]} for a classic look",
+                f"Features {selected_features[0]} and {selected_features[1]} for versatile styling"
             ]
             base_desc = random.choice(descriptions)
-            base_desc += ". Each sheet provides reliable performance for everyday use while being gentle on skin and safe for all plumbing systems. Manufactured using environmentally responsible processes for sustainable household care."
-        
+            
+        # Pants and bottoms
+        elif any(word in product_lower for word in ['pants', 'shorts', 'leggings', 'joggers']):
+            features = ['elastic waistband', 'side pockets', 'stretch fabric', 'drawstring closure', 'reinforced seams']
+            selected_features = random.sample(features, 2)
+            
+            descriptions = [
+                f"Designed with {selected_features[0]} and {selected_features[1]} for comfort and convenience",
+                f"Features {selected_features[0]} for easy wear and {selected_features[1]} for functionality",
+                f"Built with {selected_features[0]} and {selected_features[1]} for active lifestyles"
+            ]
+            base_desc = random.choice(descriptions)
+            
         # Electronics and tech
         elif any(word in product_lower for word in ['headphones', 'earbuds', 'speaker', 'charger', 'phone', 'laptop']):
+            features = ['wireless connectivity', 'long battery life', 'noise cancellation', 'fast charging', 'compact design']
+            selected_features = random.sample(features, 2)
+            
             descriptions = [
-                f"Professional-grade {product_name.lower()} featuring advanced technology for superior performance",
-                f"High-quality {product_name.lower()} designed for seamless connectivity and exceptional user experience",
-                f"Premium {product_name.lower()} with cutting-edge features and reliable durability"
+                f"Features {selected_features[0]} and {selected_features[1]} for seamless use",
+                f"Built with {selected_features[0]} and {selected_features[1]} for convenience",
+                f"Designed with {selected_features[0]} and {selected_features[1]} for reliability"
             ]
             base_desc = random.choice(descriptions)
-            if color:
-                base_desc += f" in an elegant {color} finish"
-        
-        # Clothing and apparel
-        elif any(word in product_lower for word in ['shirt', 't-shirt', 'tee', 'hoodie', 'jacket', 'pants', 'jeans']):
-            descriptions = [
-                f"Comfortable {product_name.lower()} made from premium materials for all-day wearability",
-                f"Stylish {product_name.lower()} featuring modern design and superior fabric quality",
-                f"Classic {product_name.lower()} with perfect fit and timeless appeal"
-            ]
-            base_desc = random.choice(descriptions)
-            if material:
-                base_desc += f". Crafted from soft {material} for maximum comfort"
-            if color:
-                base_desc += f" available in vibrant {color}"
-        
-        # Home and garden
-        elif any(word in product_lower for word in ['candle', 'lamp', 'plant', 'planter', 'decor']):
-            descriptions = [
-                f"Elegant {product_name.lower()} designed to enhance your living space with style and functionality",
-                f"Beautiful {product_name.lower()} featuring premium craftsmanship and attention to detail",
-                f"Sophisticated {product_name.lower()} that brings warmth and ambiance to any room"
-            ]
-            base_desc = random.choice(descriptions)
-            if material:
-                base_desc += f". Made from quality {material} for lasting beauty"
-            if color:
-                base_desc += f" in a stunning {color} finish"
-        
-        # Sports and fitness
-        elif any(word in product_lower for word in ['yoga', 'mat', 'weights', 'dumbbells', 'fitness', 'exercise']):
-            descriptions = [
-                f"Professional {product_name.lower()} engineered for optimal performance and durability",
-                f"High-performance {product_name.lower()} designed to support your fitness goals",
-                f"Premium {product_name.lower()} featuring superior construction for serious athletes"
-            ]
-            base_desc = random.choice(descriptions)
-            if material:
-                base_desc += f". Made from durable {material} for long-lasting use"
-        
-        # Food and consumables
-        elif any(word in product_lower for word in ['coffee', 'tea', 'snack', 'protein', 'organic']):
-            descriptions = [
-                f"Premium {product_name.lower()} sourced from the finest ingredients for exceptional taste",
-                f"Artisanal {product_name.lower()} carefully crafted to deliver superior flavor and quality",
-                f"Gourmet {product_name.lower()} featuring rich, complex flavors that satisfy discerning palates"
-            ]
-            base_desc = random.choice(descriptions)
-            if 'organic' in (material or '') or 'organic' in product_lower:
-                base_desc += ". Certified organic and sustainably sourced"
-        
-        # Beauty and personal care
-        elif any(word in product_lower for word in ['soap', 'shampoo', 'lotion', 'cream', 'skincare']):
-            descriptions = [
-                f"Luxurious {product_name.lower()} formulated with natural ingredients for healthy, radiant results",
-                f"Premium {product_name.lower()} designed to nourish and protect with gentle, effective care",
-                f"Professional-grade {product_name.lower()} featuring advanced formulation for superior performance"
-            ]
-            base_desc = random.choice(descriptions)
-            base_desc += ". Dermatologist-tested and suitable for daily use"
-        
-        # Toys and games
-        elif any(word in product_lower for word in ['cube', 'rubik', 'puzzle', 'game', 'toy']):
-            descriptions = [
-                f"Professional {product_name.lower()} engineered for smooth operation and competitive performance",
-                f"High-quality {product_name.lower()} featuring precision construction and superior mechanics",
-                f"Premium {product_name.lower()} designed for both beginners and advanced enthusiasts"
-            ]
-            base_desc = random.choice(descriptions)
-            if color:
-                base_desc += f" with vibrant {color} color scheme"
-        
-        # Books and media
-        elif any(word in product_lower for word in ['book', 'novel', 'guide', 'manual']):
-            descriptions = [
-                f"Comprehensive {product_name.lower()} packed with valuable insights and practical knowledge",
-                f"Engaging {product_name.lower()} written by experts to inform, inspire, and educate",
-                f"Essential {product_name.lower()} featuring in-depth coverage and expert analysis"
-            ]
-            base_desc = random.choice(descriptions)
-            base_desc += ". Perfect for both beginners and advanced readers"
-        
-        # Jewelry and accessories
-        elif any(word in product_lower for word in ['necklace', 'bracelet', 'ring', 'earrings', 'jewelry']):
-            descriptions = [
-                f"Exquisite {product_name.lower()} handcrafted with attention to detail and timeless elegance",
-                f"Stunning {product_name.lower()} featuring premium materials and sophisticated design",
-                f"Beautiful {product_name.lower()} created by skilled artisans for lasting beauty"
-            ]
-            base_desc = random.choice(descriptions)
-            if material:
-                base_desc += f". Made from genuine {material} for authentic luxury"
-        
-        # Generic fallback for unknown products
+            
+        # Default for unknown products
         else:
             descriptions = [
-                f"Premium {product_name.lower()} crafted with attention to detail and superior quality",
-                f"High-quality {product_name.lower()} designed for performance and durability",
-                f"Professional-grade {product_name.lower()} featuring excellent construction and reliability"
+                f"Designed for everyday use with attention to quality and functionality",
+                f"Built to last with thoughtful construction and reliable performance",
+                f"Crafted with care to meet your daily needs"
             ]
             base_desc = random.choice(descriptions)
+            
             if material:
-                base_desc += f". Made from quality {material}"
+                base_desc += f". Made from {material} for durability"
             if color:
                 base_desc += f" in {color}"
-            if size:
-                base_desc += f" with {size} specifications"
-        
+                
         return base_desc
-    
+
     def _generate_product_variations(self, base_product: str, prompt_lower: str) -> List[Dict]:
         """Generate variations of a product based on the prompt"""
         products = []
@@ -824,6 +930,17 @@ class CompleteShopifyStoreCreator:
         
         if not base_product:
             return self._generate_default_products()
+        
+        # Enhanced workout detection with typos and variations
+        workout_keywords = [
+            'workout', 'workouts', 'wokrout', 'wokrouts',  # typos
+            'athletic', 'fitness', 'gym', 'exercise', 'sport', 'sports',
+            'activewear', 'sportswear', 'athleisure',
+            'running', 'training', 'yoga', 'crossfit'
+        ]
+        
+        if any(word in prompt_lower for word in workout_keywords):
+            return self._generate_workout_clothing_products()
         
         # Parse specifications from the prompt
         specs = self._parse_product_specifications(prompt_lower)
@@ -837,6 +954,84 @@ class CompleteShopifyStoreCreator:
         products.extend(variations)
         
         return products[:4]  # Limit to 4 products max
+    
+    def _generate_workout_clothing_products(self) -> List[Dict]:
+        """Generate specific workout clothing products with realistic prices"""
+        workout_products = [
+            {
+                'name': 'Premium Workout T-Shirt',
+                'price': 24.99,
+                'description': 'Moisture-wicking athletic shirt designed for high-intensity workouts. Features four-way stretch fabric and breathable mesh panels for maximum comfort.',
+                'features': [
+                    'Moisture-wicking fabric',
+                    'Four-way stretch',
+                    'Breathable mesh panels',
+                    'Quick-dry technology',
+                    'Flatlock seams',
+                    'UPF 30+ sun protection'
+                ],
+                'inventory': 100
+            },
+            {
+                'name': 'Athletic Leggings',
+                'price': 39.99,
+                'description': 'High-performance leggings with compression fit and side pockets. Perfect for yoga, running, or weightlifting.',
+                'features': [
+                    'Compression fit',
+                    'Side pockets',
+                    'High waistband',
+                    'Squat-proof fabric',
+                    'Moisture-wicking',
+                    'Four-way stretch'
+                ],
+                'inventory': 85
+            },
+            {
+                'name': 'Training Shorts',
+                'price': 19.99,
+                'description': 'Lightweight training shorts with built-in compression liner. Ideal for running and cross-training.',
+                'features': [
+                    'Built-in compression liner',
+                    'Lightweight fabric',
+                    'Quick-dry material',
+                    'Elastic waistband',
+                    'Reflective details',
+                    'Multiple pockets'
+                ],
+                'inventory': 120
+            },
+            {
+                'name': 'Performance Tank Top',
+                'price': 18.49,
+                'description': 'Sleeveless performance top with racerback design. Features antimicrobial treatment and ultra-soft fabric.',
+                'features': [
+                    'Racerback design',
+                    'Antimicrobial treatment',
+                    'Ultra-soft fabric',
+                    'Moisture-wicking',
+                    'Tag-free label',
+                    'Loose fit'
+                ],
+                'inventory': 95
+            }
+        ]
+        
+        print("🏋️ Generated workout clothing products with Nike-style descriptions")
+        return workout_products
+    
+    def _normalize_price(self, price: float) -> float:
+        """Normalize price to end with .99, .49, or .00"""
+        # Convert to integer part and decimal part
+        whole_part = int(price)
+        decimal_part = price - whole_part
+        
+        # Choose ending based on the decimal part
+        if decimal_part < 0.25:
+            return float(f"{whole_part}.00")
+        elif decimal_part < 0.75:
+            return float(f"{whole_part}.49")
+        else:
+            return float(f"{whole_part}.99")
     
     def _parse_product_specifications(self, prompt_lower: str) -> Dict:
         """Parse specifications from the prompt"""
@@ -957,7 +1152,7 @@ class CompleteShopifyStoreCreator:
         
         return {
             'name': product_name,
-            'price': round(base_price, 2),
+            'price': self._normalize_price(base_price),
             'description': description,
             'inventory': specs['inventory'] if variant_type == 'standard' else random.randint(30, 60),
             'sku': sku[:12]
@@ -1215,7 +1410,12 @@ class CompleteShopifyStoreCreator:
             self._update_store_info(concept)
             
             # Create products
-            product_ids = self._create_products(concept['products'])
+            if not concept.get('products'):
+                print("⚠️ Concept contains 0 products; nothing will be pushed to Shopify.")
+                print("   Tip: Provide explicit product names/quantities or use more specific prompts.")
+                product_ids = []
+            else:
+                product_ids = self._create_products(concept['products'])
             
             # Create collection
             collection_id = self._create_collection(concept)
@@ -1525,66 +1725,6 @@ class CompleteShopifyStoreCreator:
         except Exception as e:
             print(f"   ❌ Error adding image for {product_name}: {e}")
 
-
-def interactive_store_creator():
-    """Interactive interface for creating stores"""
-    print("🛍️ AI-Powered Shopify Store Creator")
-    print("=" * 50)
-    print("💡 Just describe what you want to sell, and I'll create a complete store!")
-    print()
-    
-    # Initialize creator
-    creator = CompleteShopifyStoreCreator()
-    
-    while True:
-        print("\n" + "─" * 50)
-        prompt = input("📝 What kind of store do you want to create? (or 'quit' to exit)\n> ").strip()
-        
-        if prompt.lower() in ['quit', 'exit', 'q']:
-            print("👋 Thanks for using the AI Store Creator!")
-            break
-        
-        if not prompt:
-            continue
-        
-        try:
-            result = creator.create_store_from_prompt(prompt)
-            
-            if result.get('success', True):
-                print(f"\n🎉 SUCCESS! Your store is ready:")
-                print(f"🌐 Store URL: {result['store_url']}")
-                print(f"⚙️ Admin Panel: {result['admin_url']}")
-                print(f"📦 Products: {result['products_created']} items created")
-                print(f"🏪 Store Name: {result['concept']['store_name']}")
-                print(f"💭 Tagline: {result['concept']['tagline']}")
-                
-                if result.get('mode') == 'demo':
-                    print("\n📝 Note: This was a demo. To create real stores:")
-                    print("   1. Set up Shopify API credentials")
-                    print("   2. Run with real_mode=True")
-            else:
-                print(f"❌ Failed to create store: {result.get('error', 'Unknown error')}")
-                
-        except Exception as e:
-            print(f"❌ Error: {e}")
-
-
-def quick_test():
-    """Quick test with sample prompts"""
-    creator = CompleteShopifyStoreCreator()
-    
-    test_prompts = [
-        "Create a store for selling handmade candles and home fragrances",
-        "I want to sell yoga equipment and meditation accessories",
-        "Generate a store for vintage band t-shirts and music merchandise"
-    ]
-    
-    for prompt in test_prompts:
-        print(f"\n🧪 Testing: {prompt}")
-        result = creator.create_store_from_prompt(prompt)
-        print(f"✅ Created: {result['concept']['store_name']}")
-        time.sleep(2)
-
     def _get_all_products(self) -> List[Dict]:
         """Get all products from Shopify store"""
         if not self.real_mode:
@@ -1653,6 +1793,79 @@ def quick_test():
             print(f"❌ Error fetching product {product_id}: {e}")
             return None
 
+    def _find_product_by_name(self, product_name: str) -> Optional[Dict]:
+        """Find a product by name/title (fuzzy matching)"""
+        products = self._get_all_products()
+        if not products:
+            return None
+        
+        product_name_lower = product_name.lower().strip()
+        
+        # First try exact match
+        for product in products:
+            title = product.get('title', '').lower()
+            if title == product_name_lower:
+                return product
+        
+        # Then try partial matches
+        for product in products:
+            title = product.get('title', '').lower()
+            # Check if product name is contained in title or vice versa
+            if product_name_lower in title or title in product_name_lower:
+                return product
+        
+        # Try keyword matching
+        product_keywords = product_name_lower.split()
+        for product in products:
+            title = product.get('title', '').lower()
+            # Check if all keywords from product_name are in the title
+            if all(keyword in title for keyword in product_keywords):
+                return product
+        
+        return None
+
+    def _identify_product_from_prompt(self, prompt: str) -> Optional[Dict]:
+        """Identify which product to edit from a natural language prompt"""
+        prompt_lower = prompt.lower()
+        
+        # Common patterns for identifying products
+        product_patterns = [
+            r'(?:change|edit|update|modify)\s+(?:the\s+)?([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+(?:to|into|and))',
+            r'(?:make|turn)\s+(?:the\s+)?([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+(?:into|to))',
+            r'(?:the\s+)?([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+(?:should|needs|must))',
+            r'(?:for\s+(?:the\s+)?)?([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+(?:product|item))',
+        ]
+        
+        # Try to extract product identifier from prompt
+        for pattern in product_patterns:
+            match = re.search(pattern, prompt_lower)
+            if match:
+                potential_product_name = match.group(1).strip()
+                
+                # Skip common words that aren't product names
+                skip_words = ['it', 'this', 'that', 'product', 'item', 'thing']
+                if potential_product_name not in skip_words:
+                    product = self._find_product_by_name(potential_product_name)
+                    if product:
+                        return product
+        
+        # If no specific product identified, try common product types mentioned
+        products = self._get_all_products()
+        if not products:
+            return None
+        
+        # Look for product type mentions
+        for product in products:
+            title = product.get('title', '').lower()
+            title_words = title.split()
+            
+            # Check if any significant word from the title appears in the prompt
+            for word in title_words:
+                if len(word) > 3 and word in prompt_lower:  # Skip short words
+                    return product
+        
+        return None
+
     def _update_product(self, product_id: str, updates: Dict) -> Optional[Dict]:
         """Update a product with new data"""
         if not self.real_mode:
@@ -1699,71 +1912,124 @@ def quick_test():
         if variants:
             current_price = float(variants[0].get('price', 0))
         
-        # Parse title changes
+        # Parse different types of changes
+        
+        # 1. Title/Name changes
         if any(word in prompt_lower for word in ['title', 'name', 'call it', 'rename']):
-            # Extract new title from prompt
             title_patterns = [
-                r'title.*?["\']([^"\']+)["\']',
-                r'name.*?["\']([^"\']+)["\']',
-                r'call it\s+["\']([^"\']+)["\']',
-                r'rename.*?to\s+["\']([^"\']+)["\']'
+                r'(?:title|name|call it|rename).*?["\']([^"\']+)["\']',
+                r'(?:title|name|call it|rename).*?(?:to|as)\s+([^,\.\!]+)',
             ]
             
             for pattern in title_patterns:
                 match = re.search(pattern, prompt, re.IGNORECASE)
                 if match:
-                    updates['title'] = match.group(1)
+                    new_title = match.group(1).strip()
+                    updates['title'] = new_title
+                    updates['generate_new_image'] = True
                     break
-            
-            # If no quotes found, try to extract from context
-            if 'title' not in updates:
-                if 'black' in prompt_lower and 'water bottle' in prompt_lower:
-                    updates['title'] = 'Black Stainless Steel Water Bottle'
-                elif 'stainless steel' in prompt_lower and 'bottle' in prompt_lower:
-                    updates['title'] = 'Stainless Steel Water Bottle'
         
-        # Parse color changes
-        colors = ['black', 'white', 'silver', 'blue', 'red', 'green', 'gold', 'rose gold']
-        for color in colors:
-            if color in prompt_lower:
-                if 'title' not in updates:
-                    # Update title to include color
-                    updates['title'] = f"{color.title()} {current_title}"
+        # 2. Scent/Flavor changes
+        scent_patterns = [
+            r'(?:change|make|turn).*?(?:to|into)\s+([^,\.\!]+?)(?:\s+(?:scented|flavored|flavor|scent))',
+            r'(?:scented|flavored|flavor|scent).*?(?:to|as|with)\s+([^,\.\!]+)',
+            r'(?:vanilla|lavender|cherry|lemon|mint|chocolate|strawberry|coconut|pine|eucalyptus)'
+        ]
+        
+        for pattern in scent_patterns:
+            match = re.search(pattern, prompt_lower)
+            if match:
+                if len(match.groups()) > 0:
+                    scent = match.group(1).strip()
+                else:
+                    scent = match.group(0).strip()
+                
+                # Update title to include new scent
+                base_title = current_title
+                # Remove existing scent words
+                scent_words = ['vanilla', 'lavender', 'cherry', 'lemon', 'mint', 'chocolate', 'strawberry', 'coconut', 'pine', 'eucalyptus']
+                for word in scent_words:
+                    base_title = re.sub(rf'\b{word}\b', '', base_title, flags=re.IGNORECASE).strip()
+                
+                # Clean up extra spaces
+                base_title = re.sub(r'\s+', ' ', base_title).strip()
+                
+                # Add new scent
+                updates['title'] = f"{scent.title()} {base_title}"
                 updates['generate_new_image'] = True
                 break
         
-        # Parse size/capacity changes
+        # 3. Color changes
+        colors = ['black', 'white', 'silver', 'blue', 'red', 'green', 'gold', 'rose gold', 'pink', 'purple', 'orange', 'yellow', 'brown', 'gray', 'grey']
+        color_patterns = [
+            r'(?:change|make|turn).*?(?:to|into)\s+((?:' + '|'.join(colors) + r'))',
+            r'(?:color|colored).*?(?:to|as)\s+((?:' + '|'.join(colors) + r'))',
+        ]
+        
+        for pattern in color_patterns:
+            match = re.search(pattern, prompt_lower)
+            if match:
+                new_color = match.group(1).strip()
+                
+                # Update title to include new color
+                base_title = current_title
+                # Remove existing color words
+                for color in colors:
+                    base_title = re.sub(rf'\b{color}\b', '', base_title, flags=re.IGNORECASE).strip()
+                
+                # Clean up extra spaces
+                base_title = re.sub(r'\s+', ' ', base_title).strip()
+                
+                # Add new color
+                updates['title'] = f"{new_color.title()} {base_title}"
+                updates['generate_new_image'] = True
+                break
+        
+        # 4. Size/Capacity changes
         size_patterns = [
-            r'(\d+)\s*oz',
-            r'(\d+)\s*ounce',
-            r'(\d+)\s*ml',
-            r'(\d+)\s*liter'
+            r'(?:change|make|turn).*?(?:to|into)\s+(\d+)\s*(oz|ounce|ml|liter|inch|inches|ft|feet)',
+            r'(?:size|capacity).*?(?:to|as)\s+(\d+)\s*(oz|ounce|ml|liter|inch|inches|ft|feet)',
+            r'(\d+)\s*(oz|ounce|ml|liter|inch|inches|ft|feet)'
         ]
         
         for pattern in size_patterns:
             match = re.search(pattern, prompt_lower)
             if match:
                 size = match.group(1)
-                unit = 'oz' if 'oz' in match.group(0) else ('ml' if 'ml' in match.group(0) else 'L')
+                unit = match.group(2)
                 
-                # Update title and description
-                if 'title' not in updates:
-                    updates['title'] = f"{current_title} - {size}{unit}"
+                # Normalize unit
+                if unit in ['ounce']:
+                    unit = 'oz'
+                elif unit in ['liter']:
+                    unit = 'L'
+                elif unit in ['inches']:
+                    unit = 'inch'
+                elif unit in ['feet']:
+                    unit = 'ft'
+                
+                # Update title
+                base_title = current_title
+                # Remove existing size info
+                base_title = re.sub(r'\d+\s*(oz|ounce|ml|liter|inch|inches|ft|feet|L)', '', base_title, flags=re.IGNORECASE).strip()
+                base_title = re.sub(r'\s+', ' ', base_title).strip()
+                
+                updates['title'] = f"{base_title} - {size}{unit}"
                 
                 # Update description
                 description = current_description or ""
-                if size not in description:
-                    description += f"\n<p><strong>Capacity:</strong> {size}{unit}</p>"
+                if f"{size}{unit}" not in description:
+                    description += f"\n<p><strong>Size:</strong> {size}{unit}</p>"
                     updates['body_html'] = description
                 
                 updates['generate_new_image'] = True
                 break
         
-        # Parse price changes
+        # 5. Price changes
         price_patterns = [
-            r'\$(\d+\.?\d*)',
-            r'price.*?(\d+\.?\d*)',
-            r'cost.*?(\d+\.?\d*)'
+            r'(?:change|make|set).*?(?:price|cost).*?(?:to|as)\s*\$?(\d+\.?\d*)',
+            r'(?:price|cost).*?(?:to|as)\s*\$?(\d+\.?\d*)',
+            r'\$(\d+\.?\d*)'
         ]
         
         for pattern in price_patterns:
@@ -1773,15 +2039,24 @@ def quick_test():
                 updates['variants'] = [{'price': str(new_price)}]
                 break
         
-        # Parse description changes
-        if any(word in prompt_lower for word in ['description', 'details', 'about']):
-            # For now, enhance existing description
+        # 6. Description/Feature changes
+        if any(word in prompt_lower for word in ['description', 'details', 'feature', 'add']):
             if current_description:
                 updates['body_html'] = self._enhance_product_description(current_description, prompt)
         
-        # Always generate new image if significant changes
-        if any(key in updates for key in ['title']) or any(color in prompt_lower for color in colors):
-            updates['generate_new_image'] = True
+        # 7. Material changes
+        materials = ['stainless steel', 'plastic', 'glass', 'ceramic', 'wood', 'metal', 'fabric', 'leather', 'cotton']
+        for material in materials:
+            if material in prompt_lower:
+                base_title = current_title
+                # Remove existing material words
+                for mat in materials:
+                    base_title = re.sub(rf'\b{mat}\b', '', base_title, flags=re.IGNORECASE).strip()
+                
+                base_title = re.sub(r'\s+', ' ', base_title).strip()
+                updates['title'] = f"{material.title()} {base_title}"
+                updates['generate_new_image'] = True
+                break
         
         return updates
 
@@ -1814,12 +2089,27 @@ def quick_test():
         """Generate and upload a new product image"""
         try:
             # Generate image using AI
-            image_path = self.image_generator.generate_product_image(product_title)
+            image_bytes = self.image_generator.generate_product_image(product_title)
             
-            if image_path and os.path.exists(image_path):
-                # Upload to Shopify
-                image_url = self._upload_product_image(image_path, product_id)
-                return image_url
+            if image_bytes and len(image_bytes) > 1000:
+                # Create filename
+                safe_name = re.sub(r'[^a-zA-Z0-9\s]', '', product_title)
+                safe_name = re.sub(r'\s+', '_', safe_name).lower()
+                filename = f"{safe_name}_updated.png"
+                
+                # Upload to Shopify using the image generator's method
+                success = self.image_generator.upload_image_to_shopify(
+                    image_bytes, filename, product_id, 
+                    self.shop_domain, self.access_token
+                )
+                
+                if success:
+                    print(f"   🖼️ Generated and uploaded new image for {product_title}")
+                    return f"Updated image for {product_title}"
+                else:
+                    print(f"   ⚠️ Failed to upload generated image for {product_title}")
+            else:
+                print(f"   ⚠️ Failed to generate image for {product_title}")
         
         except Exception as e:
             print(f"❌ Error generating/uploading image: {e}")
@@ -1853,6 +2143,66 @@ def quick_test():
             
         except Exception as e:
             print(f"❌ Error updating product image: {e}")
+
+
+def interactive_store_creator():
+    """Interactive interface for creating stores"""
+    print("🛍️ AI-Powered Shopify Store Creator")
+    print("=" * 50)
+    print("💡 Just describe what you want to sell, and I'll create a complete store!")
+    print()
+    
+    # Initialize creator
+    creator = CompleteShopifyStoreCreator()
+    
+    while True:
+        print("\n" + "─" * 50)
+        prompt = input("📝 What kind of store do you want to create? (or 'quit' to exit)\n> ").strip()
+        
+        if prompt.lower() in ['quit', 'exit', 'q']:
+            print("👋 Thanks for using the AI Store Creator!")
+            break
+        
+        if not prompt:
+            continue
+        
+        try:
+            result = creator.create_store_from_prompt(prompt)
+            
+            if result.get('success', True):
+                print(f"\n🎉 SUCCESS! Your store is ready:")
+                print(f"🌐 Store URL: {result['store_url']}")
+                print(f"⚙️ Admin Panel: {result['admin_url']}")
+                print(f"📦 Products: {result['products_created']} items created")
+                print(f"🏪 Store Name: {result['concept']['store_name']}")
+                print(f"💭 Tagline: {result['concept']['tagline']}")
+                
+                if result.get('mode') == 'demo':
+                    print("\n📝 Note: This was a demo. To create real stores:")
+                    print("   1. Set up Shopify API credentials")
+                    print("   2. Run with real_mode=True")
+            else:
+                print(f"❌ Failed to create store: {result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            print(f"❌ Error: {e}")
+
+
+def quick_test():
+    """Quick test with sample prompts"""
+    creator = CompleteShopifyStoreCreator()
+    
+    test_prompts = [
+        "Create a store for selling handmade candles and home fragrances",
+        "I want to sell yoga equipment and meditation accessories",
+        "Generate a store for vintage band t-shirts and music merchandise"
+    ]
+    
+    for prompt in test_prompts:
+        print(f"\n🧪 Testing: {prompt}")
+        result = creator.create_store_from_prompt(prompt)
+        print(f"✅ Created: {result['concept']['store_name']}")
+        time.sleep(2)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,20 @@ class MarketResearcher:
     def __init__(self):
         self.competitor_data = {}
         self.product_features = {}
+    
+    def _normalize_price(self, price: float) -> float:
+        """Normalize price to end with .99, .49, or .00"""
+        # Convert to integer part and decimal part
+        whole_part = int(price)
+        decimal_part = price - whole_part
+        
+        # Choose ending based on the decimal part
+        if decimal_part < 0.25:
+            return float(f"{whole_part}.00")
+        elif decimal_part < 0.75:
+            return float(f"{whole_part}.49")
+        else:
+            return float(f"{whole_part}.99")
         
     def research_product(self, product_name: str, category: str = "general") -> Dict:
         """
@@ -255,7 +269,7 @@ class MarketResearcher:
         }
         
         return {
-            "suggested_price": round(data["avg_price"] + random.uniform(-5, 10), 2),
+            "suggested_price": self._normalize_price(data["avg_price"] + random.uniform(-5, 10)),
             "price_range": data["price_range"],
             "enhanced_description": descriptions[product_type],
             "key_features": data["features"],
@@ -343,10 +357,11 @@ class MarketResearcher:
         
         # Product category intelligence - ordered by specificity
         categories = {
+            'athletic_wear': ['workout', 'athletic', 'legging', 'tank top', 't-shirt', 'shorts', 'sportswear', 'activewear', 'training', 'performance'],
             'household': ['toilet paper', 'tissue', 'paper towel', 'napkin', 'soap', 'detergent', 'cleaner', 'sponge', 'towel'],
             'office': ['pen', 'pencil', 'paper', 'folder', 'binder', 'stapler', 'calculator', 'desk', 'tissue', 'napkin'],
             'electronics': ['phone', 'laptop', 'tablet', 'headphone', 'speaker', 'charger', 'cable', 'mouse', 'keyboard'],
-            'fitness': ['weight', 'dumbbell', 'resistance', 'gym', 'exercise', 'fitness', 'workout', 'protein'],
+            'fitness_equipment': ['weight', 'dumbbell', 'resistance', 'gym', 'exercise', 'equipment', 'protein'],
             'kitchen': ['knife', 'pan', 'pot', 'blender', 'mixer', 'cutting', 'board', 'spatula', 'whisk'],
             'clothing': ['shirt', 'pants', 'dress', 'jacket', 'shoes', 'sneaker', 'boot', 'hat', 'cap'],
             'books': ['book', 'novel', 'guide', 'manual', 'textbook', 'cookbook', 'journal', 'notebook'],
@@ -370,8 +385,9 @@ class MarketResearcher:
         
         # Category-specific pricing ranges (realistic market data)
         pricing_data = {
+            'athletic_wear': {'min': 15, 'max': 45, 'avg': 25},  # Realistic athletic clothing prices
             'electronics': {'min': 15, 'max': 300, 'avg': 75},
-            'fitness': {'min': 20, 'max': 200, 'avg': 60},
+            'fitness_equipment': {'min': 20, 'max': 200, 'avg': 60},
             'kitchen': {'min': 10, 'max': 150, 'avg': 35},
             'clothing': {'min': 15, 'max': 120, 'avg': 45},
             'books': {'min': 8, 'max': 40, 'avg': 18},
@@ -390,12 +406,23 @@ class MarketResearcher:
         }
         
         price_info = pricing_data.get(detected_category, pricing_data['general'])
-        suggested_price = random.uniform(price_info['min'], price_info['max'])
+        
+        # Use average price with minimal realistic variance for better pricing
+        if detected_category == 'athletic_wear':
+            # Extra control for athletic wear to keep prices realistic
+            suggested_price = price_info['avg'] + random.uniform(-3, 3)
+            suggested_price = max(price_info['min'], min(price_info['max'], suggested_price))
+        else:
+            suggested_price = random.uniform(price_info['min'], price_info['max'])
+        
+        # Apply price normalization to ensure .99/.49/.00 endings
+        suggested_price = self._normalize_price(suggested_price)
         
         # Generate features based on category
         feature_templates = {
+            'athletic_wear': ['Moisture-wicking fabric', 'Four-way stretch', 'Quick-dry technology', 'Breathable design'],
             'electronics': ['High-quality components', 'Durable construction', 'Energy efficient', 'User-friendly interface'],
-            'fitness': ['Professional grade', 'Ergonomic design', 'Non-slip grip', 'Adjustable settings'],
+            'fitness_equipment': ['Professional grade', 'Ergonomic design', 'Non-slip grip', 'Adjustable settings'],
             'kitchen': ['Food-safe materials', 'Easy to clean', 'Heat resistant', 'Precision crafted'],
             'clothing': ['Premium fabric', 'Comfortable fit', 'Durable stitching', 'Stylish design'],
             'books': ['Expert knowledge', 'Easy to follow', 'Comprehensive content', 'Professional binding'],
@@ -413,21 +440,70 @@ class MarketResearcher:
             'general': ['High-quality materials', 'Professional craftsmanship', 'Reliable performance', 'User-friendly design']
         }
         
-        features = feature_templates.get(detected_category, feature_templates['general'])
+        # Generate features based on specific product type (more granular than category)
+        product_features = self._get_product_specific_features(product_name, detected_category)
         
         # Create detailed description
-        description = f"Premium {product_name.lower()} featuring {features[0].lower()} and {features[1].lower()}. Designed for optimal performance and durability, this {detected_category} item offers {features[2].lower()} with {features[3].lower()}. Perfect for both beginners and professionals seeking reliable, high-quality equipment."
+        if len(product_features) >= 2:
+            description = f"{product_name} featuring {product_features[0].lower()} and {product_features[1].lower()}. Designed for optimal performance and durability, this {detected_category} item offers excellent value. Perfect for both beginners and professionals seeking reliable equipment."
+        else:
+            description = f"Quality {product_name.lower()} designed for reliable performance and lasting durability."
         
         return {
-            'suggested_price': round(suggested_price, 2),
+            'suggested_price': suggested_price,
             'price_range': (price_info['min'], price_info['max']),
             'enhanced_description': description,
-            'key_features': features,
+            'key_features': product_features,
             'category': detected_category,
             'market_position': 'competitive',
             'market_notes': f'Competitively priced in the {detected_category} market segment based on feature set and quality.'
         }
     
+    def _get_product_specific_features(self, product_name: str, category: str) -> List[str]:
+        """Generate realistic, product-specific features"""
+        name_lower = product_name.lower()
+        
+        # Specific product type features (most specific)
+        if any(word in name_lower for word in ['workout clothes', 'athletic wear', 'activewear', 'sportswear']):
+            features = ['Moisture-wicking fabric', 'Four-way stretch', 'Breathable mesh panels', 'Quick-dry technology', 'Flatlock seams', 'Anti-odor treatment']
+        elif any(word in name_lower for word in ['shoes', 'sneakers', 'runners', 'trainers']):
+            features = ['Responsive cushioning', 'Rubber outsole', 'Breathable upper', 'Arch support', 'Heel counter', 'Lace-up closure']
+        elif any(word in name_lower for word in ['shirt', 'tee', 'top', 'tank']):
+            features = ['Soft cotton blend', 'Comfortable fit', 'Tagless design', 'Pre-shrunk fabric', 'Crew neck', 'Classic styling']
+        elif any(word in name_lower for word in ['pants', 'shorts', 'leggings', 'joggers']):
+            features = ['Elastic waistband', 'Side pockets', 'Stretch fabric', 'Reinforced seams', 'Drawstring closure', 'Relaxed fit']
+        elif any(word in name_lower for word in ['water bottle', 'bottle', 'tumbler', 'flask']):
+            features = ['Double-wall insulation', 'Leak-proof design', 'BPA-free construction', 'Wide mouth opening', 'Carry handle', 'Dishwasher safe']
+        elif any(word in name_lower for word in ['headphones', 'earbuds']):
+            features = ['Wireless connectivity', 'Active noise cancellation', 'Long battery life', 'Comfortable fit', 'High-quality audio', 'Touch controls']
+        elif any(word in name_lower for word in ['phone case', 'laptop bag', 'backpack']):
+            features = ['Durable materials', 'Shock absorption', 'Multiple compartments', 'Water-resistant', 'Adjustable straps', 'Secure closure']
+        else:
+            # Fallback to category-based features (remove generic filler words)
+            category_features = {
+                'electronics': ['Wireless connectivity', 'Long battery life', 'Fast charging', 'Compact design'],
+                'fitness': ['Adjustable resistance', 'Ergonomic grip', 'Anti-slip base', 'Quick setup'],
+                'kitchen': ['Food-safe materials', 'Easy to clean', 'Heat resistant', 'Dishwasher safe'],
+                'clothing': ['Comfortable fit', 'Durable stitching', 'Color-fast fabric', 'Machine washable'],
+                'books': ['Expert knowledge', 'Easy to follow', 'Comprehensive content', 'Illustrated guides'],
+                'beauty': ['Natural ingredients', 'Dermatologist tested', 'Long-lasting formula', 'Gentle application'],
+                'home': ['Easy assembly', 'Space-saving design', 'Durable construction', 'Modern styling'],
+                'tools': ['Heavy-duty construction', 'Precision engineered', 'Comfortable grip', 'Corrosion resistant'],
+                'toys': ['Safe materials', 'Educational value', 'Age-appropriate', 'Durable design'],
+                'sports': ['Competition ready', 'Performance optimized', 'Weather resistant', 'Official size'],
+                'automotive': ['OEM quality', 'Easy installation', 'Reliable performance', 'Warranty included'],
+                'garden': ['Weather resistant', 'Easy to use', 'Natural materials', 'Season-long performance'],
+                'jewelry': ['Hypoallergenic metals', 'Elegant design', 'Handcrafted quality', 'Gift packaging'],
+                'pet': ['Pet-safe materials', 'Comfortable design', 'Easy to clean', 'Size options'],
+                'office': ['Reliable performance', 'Efficient design', 'Space-saving', 'Professional quality'],
+                'household': ['Soft and strong', 'Absorbent layers', 'Gentle texture', 'Bulk packaging'],
+                'general': ['Quality materials', 'Reliable performance', 'User-friendly design', 'Good value']
+            }
+            features = category_features.get(category, category_features['general'])
+        
+        # Return up to 4 relevant features
+        return features[:4]
+
     def _research_general_product(self, product_name: str) -> Dict:
         """Research general product categories"""
         

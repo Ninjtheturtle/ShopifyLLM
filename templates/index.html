@@ -118,35 +118,149 @@
                             <!-- Current product details will be shown here -->
                         </div>
                         
-                        <form id="productEditForm" class="edit-form">
-                            <div class="form-group">
-                                <label for="editPrompt">
-                                    <i class="fas fa-magic"></i>
-                                    How would you like to edit this product?
-                                </label>
-                                <textarea 
-                                    id="editPrompt" 
-                                    name="prompt" 
-                                    placeholder="e.g., Make this a black water bottle with 20oz capacity and update the image"
-                                    rows="3"
-                                    required
-                                ></textarea>
-                                <div class="form-hint">
-                                    Describe what you want to change: color, size, title, price, description, etc.
-                                </div>
-                            </div>
+                        <!-- Edit Tabs -->
+                        <div class="edit-tabs">
+                            <button class="edit-tab-btn active" data-tab="ai-edit">
+                                <i class="fas fa-magic"></i> AI Edit
+                            </button>
+                            <button class="edit-tab-btn" data-tab="manual-edit">
+                                <i class="fas fa-pen"></i> Manual Edit
+                            </button>
+                        </div>
 
-                            <div class="edit-actions">
-                                <button type="submit" class="edit-btn" id="editProductBtn">
-                                    <i class="fas fa-save"></i>
-                                    Update Product
-                                </button>
-                                <button type="button" class="cancel-btn" id="cancelEditBtn">
-                                    <i class="fas fa-ban"></i>
-                                    Cancel
-                                </button>
-                            </div>
-                        </form>
+                        <!-- AI Edit Tab -->
+                        <div class="edit-tab-content active" id="ai-edit-tab">
+                            <form id="productEditForm" class="edit-form">
+                                <div class="form-group">
+                                    <label for="editPrompt">
+                                        <i class="fas fa-magic"></i>
+                                        How would you like to edit this product?
+                                    </label>
+                                    <textarea 
+                                        id="editPrompt" 
+                                        name="prompt" 
+                                        placeholder="e.g., Make this a black water bottle with 20oz capacity and update the image"
+                                        rows="3"
+                                        required
+                                    ></textarea>
+                                    <div class="form-hint">
+                                        Describe what you want to change: color, size, title, price, description, etc.
+                                    </div>
+                                </div>
+
+                                <div class="edit-actions">
+                                    <button type="submit" class="edit-btn" id="editProductBtn">
+                                        <i class="fas fa-save"></i>
+                                        Update Product
+                                    </button>
+                                    <button type="button" class="cancel-btn" id="cancelEditBtn">
+                                        <i class="fas fa-ban"></i>
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Manual Edit Tab -->
+                        <div class="edit-tab-content" id="manual-edit-tab">
+                            <form id="manualEditForm" class="edit-form">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="productTitle">
+                                            <i class="fas fa-tag"></i>
+                                            Product Name
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            id="productTitle" 
+                                            name="title" 
+                                            placeholder="Enter product name"
+                                        />
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="productPrice">
+                                            <i class="fas fa-dollar-sign"></i>
+                                            Price
+                                        </label>
+                                        <input 
+                                            type="number" 
+                                            id="productPrice" 
+                                            name="price" 
+                                            step="0.01"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="productDescription">
+                                        <i class="fas fa-align-left"></i>
+                                        Description
+                                    </label>
+                                    <textarea 
+                                        id="productDescription" 
+                                        name="description" 
+                                        rows="4"
+                                        placeholder="Enter product description"
+                                    ></textarea>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="productTags">
+                                            <i class="fas fa-tags"></i>
+                                            SEO Tags
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            id="productTags" 
+                                            name="tags" 
+                                            placeholder="tag1, tag2, tag3"
+                                        />
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="productType">
+                                            <i class="fas fa-layer-group"></i>
+                                            Product Type
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            id="productType" 
+                                            name="product_type" 
+                                            placeholder="e.g., Home & Garden"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>
+                                        <i class="fas fa-image"></i>
+                                        Product Image
+                                    </label>
+                                    <div class="image-options">
+                                        <button type="button" class="image-btn" id="generateImageBtn">
+                                            <i class="fas fa-magic"></i>
+                                            Generate New AI Image
+                                        </button>
+                                        <button type="button" class="image-btn" id="keepImageBtn">
+                                            <i class="fas fa-check"></i>
+                                            Keep Current Image
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="edit-actions">
+                                    <button type="submit" class="edit-btn" id="manualEditBtn">
+                                        <i class="fas fa-save"></i>
+                                        Save Changes
+                                    </button>
+                                    <button type="button" class="cancel-btn" id="cancelManualEditBtn">
+                                        <i class="fas fa-ban"></i>
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 </div>
 
@@ -158,6 +272,72 @@
                             <div class="progress-fill" id="editProgressFill"></div>
                         </div>
                         <div class="progress-text" id="editProgressText">Analyzing changes...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Smart Edit Section -->
+            <section class="smart-edit-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-wand-magic-sparkles"></i> Smart Product Editor</h2>
+                    <p>Edit products by simply describing what you want to change</p>
+                </div>
+
+                <form id="smartEditForm" class="smart-edit-form">
+                    <div class="form-group">
+                        <label for="smartEditPrompt">
+                            <i class="fas fa-comment-dots"></i>
+                            Describe the changes you want to make
+                        </label>
+                        <textarea 
+                            id="smartEditPrompt" 
+                            name="prompt" 
+                            placeholder="e.g., Change the lavender candle to vanilla scented, or Make the water bottle black and 20oz capacity"
+                            rows="3"
+                            required
+                        ></textarea>
+                        <div class="form-hint">
+                            Examples: "Change the candle to cherry scented", "Make the bottle 16oz", "Change price to $25", "Make it blue colored"
+                        </div>
+                    </div>
+
+                    <button type="submit" class="smart-edit-btn" id="smartEditBtn">
+                        <i class="fas fa-magic"></i>
+                        Apply Smart Edit
+                    </button>
+                </form>
+
+                <!-- Smart Edit Examples -->
+                <div class="smart-examples-section">
+                    <h3><i class="fas fa-lightbulb"></i> Example Commands</h3>
+                    <div class="examples-grid">
+                        <div class="example-card" onclick="useSmartEditExample('Change the candle to vanilla scented')">
+                            <i class="fas fa-fire"></i>
+                            <p>Change candle scent to vanilla</p>
+                        </div>
+                        <div class="example-card" onclick="useSmartEditExample('Make the water bottle black and 20oz')">
+                            <i class="fas fa-tint"></i>
+                            <p>Change bottle color and size</p>
+                        </div>
+                        <div class="example-card" onclick="useSmartEditExample('Set the price to $25')">
+                            <i class="fas fa-dollar-sign"></i>
+                            <p>Update product pricing</p>
+                        </div>
+                        <div class="example-card" onclick="useSmartEditExample('Add eco-friendly to the description')">
+                            <i class="fas fa-leaf"></i>
+                            <p>Enhance product description</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Smart Edit Progress -->
+                <div class="smart-edit-progress" id="smartEditProgress" style="display: none;">
+                    <div class="progress-card">
+                        <h3><i class="fas fa-brain fa-spin"></i> Processing Smart Edit</h3>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="smartEditProgressFill"></div>
+                        </div>
+                        <div class="progress-text" id="smartEditProgressText">Finding product to edit...</div>
                     </div>
                 </div>
             </section>

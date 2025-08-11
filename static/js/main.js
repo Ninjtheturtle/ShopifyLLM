@@ -6,6 +6,7 @@ class StoreCreator {
         this.loadRecentStores();
         this.initSettings();
         this.initProductManagement();
+        this.initSmartEdit();
         this.currentEditJob = null;
     }
 
@@ -569,15 +570,38 @@ StoreCreator.prototype.initProductManagement = function() {
     this.productsGrid = document.getElementById('productsGrid');
     this.productEditor = document.getElementById('productEditor');
     this.productEditForm = document.getElementById('productEditForm');
+    this.manualEditForm = document.getElementById('manualEditForm');
     this.editProgress = document.getElementById('editProgress');
     this.closeEditorBtn = document.getElementById('closeEditorBtn');
     this.cancelEditBtn = document.getElementById('cancelEditBtn');
+    this.cancelManualEditBtn = document.getElementById('cancelManualEditBtn');
+
+    // Initialize edit tabs
+    this.initEditTabs();
 
     // Bind product management events
     this.loadProductsBtn.addEventListener('click', () => this.loadProducts());
     this.productEditForm.addEventListener('submit', (e) => this.handleProductEdit(e));
     this.closeEditorBtn.addEventListener('click', () => this.closeProductEditor());
     this.cancelEditBtn.addEventListener('click', () => this.closeProductEditor());
+    
+    if (this.manualEditForm) {
+        this.manualEditForm.addEventListener('submit', (e) => this.handleManualEdit(e));
+    }
+    if (this.cancelManualEditBtn) {
+        this.cancelManualEditBtn.addEventListener('click', () => this.closeProductEditor());
+    }
+
+    // Image generation buttons
+    const generateImageBtn = document.getElementById('generateImageBtn');
+    const keepImageBtn = document.getElementById('keepImageBtn');
+    
+    if (generateImageBtn) {
+        generateImageBtn.addEventListener('click', () => this.toggleImageGeneration(true));
+    }
+    if (keepImageBtn) {
+        keepImageBtn.addEventListener('click', () => this.toggleImageGeneration(false));
+    }
 };
 
 StoreCreator.prototype.loadProducts = async function() {
@@ -725,8 +749,11 @@ StoreCreator.prototype.showProductEditor = function(product) {
              onerror="this.src='/static/images/no-image.png'" style="margin-top: 1rem;">
     `;
 
-    // Clear edit form
+    // Clear edit prompt
     document.getElementById('editPrompt').value = '';
+    
+    // Populate manual edit form
+    this.populateManualEditForm(product);
 
     // Show editor
     this.productEditor.style.display = 'block';
@@ -834,10 +861,14 @@ StoreCreator.prototype.startEditProgressMonitoring = function(jobId) {
                 
                 this.showToast('Product updated successfully!', 'success');
                 
-                // Hide progress and editor after a delay
+                // Re-enable the edit button
+                const editBtn = document.getElementById('editProductBtn');
+                editBtn.disabled = false;
+                editBtn.innerHTML = '<i class="fas fa-save"></i> Update Product';
+                
+                // Hide progress after a delay
                 setTimeout(() => {
                     this.editProgress.style.display = 'none';
-                    this.closeProductEditor();
                     
                     // Reload products to show changes
                     this.loadProducts();
@@ -876,6 +907,132 @@ StoreCreator.prototype.getEditProgressText = function(progress) {
     return 'Finalizing changes...';
 };
 
+StoreCreator.prototype.initEditTabs = function() {
+    const tabBtns = document.querySelectorAll('.edit-tab-btn');
+    const tabContents = document.querySelectorAll('.edit-tab-content');
+    
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabId = btn.dataset.tab;
+            
+            // Remove active class from all tabs and contents
+            tabBtns.forEach(b => b.classList.remove('active'));
+            tabContents.forEach(c => c.classList.remove('active'));
+            
+            // Add active class to clicked tab and corresponding content
+            btn.classList.add('active');
+            document.getElementById(`${tabId}-tab`).classList.add('active');
+        });
+    });
+};
+
+StoreCreator.prototype.handleManualEdit = async function(e) {
+    e.preventDefault();
+    
+    if (!this.currentProduct) {
+        this.showToast('No product selected for editing', 'error');
+        return;
+    }
+
+    const formData = new FormData(e.target);
+    const updates = {};
+    
+    // Collect form data
+    const title = formData.get('title')?.trim();
+    const price = formData.get('price')?.trim();
+    const description = formData.get('description')?.trim();
+    const tags = formData.get('tags')?.trim();
+    const productType = formData.get('product_type')?.trim();
+    
+    if (title) updates.title = title;
+    if (price) updates.variants = [{ price: price }];
+    if (description) updates.body_html = description;
+    if (tags) updates.tags = tags;
+    if (productType) updates.product_type = productType;
+    
+    // Check if image generation is requested
+    if (this.generateNewImage) {
+        updates.generate_new_image = true;
+    }
+    
+    if (Object.keys(updates).length === 0) {
+        this.showToast('Please make at least one change', 'error');
+        return;
+    }
+
+    try {
+        // Disable form
+        const manualEditBtn = document.getElementById('manualEditBtn');
+        manualEditBtn.disabled = true;
+        manualEditBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Saving...';
+
+        const response = await fetch(`/api/products/${this.currentProduct.id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(updates)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to update product');
+        }
+
+        this.showToast('Product updated successfully!', 'success');
+        this.closeProductEditor();
+        this.loadProducts(); // Reload products to show changes
+
+    } catch (error) {
+        console.error('Error updating product:', error);
+        this.showToast('Failed to update product: ' + error.message, 'error');
+    } finally {
+        const manualEditBtn = document.getElementById('manualEditBtn');
+        manualEditBtn.disabled = false;
+        manualEditBtn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
+    }
+};
+
+StoreCreator.prototype.toggleImageGeneration = function(generate) {
+    this.generateNewImage = generate;
+    
+    const generateBtn = document.getElementById('generateImageBtn');
+    const keepBtn = document.getElementById('keepImageBtn');
+    
+    if (generateBtn && keepBtn) {
+        if (generate) {
+            generateBtn.classList.add('selected');
+            keepBtn.classList.remove('selected');
+        } else {
+            generateBtn.classList.remove('selected');
+            keepBtn.classList.add('selected');
+        }
+    }
+};
+
+StoreCreator.prototype.populateManualEditForm = function(product) {
+    // Populate the manual edit form with current product data
+    const titleField = document.getElementById('productTitle');
+    const descField = document.getElementById('productDescription');
+    const tagsField = document.getElementById('productTags');
+    const typeField = document.getElementById('productType');
+    const priceField = document.getElementById('productPrice');
+    
+    if (titleField) titleField.value = product.title || '';
+    if (descField) descField.value = this.stripHtml(product.body_html || '');
+    if (tagsField) tagsField.value = product.tags || '';
+    if (typeField) typeField.value = product.product_type || '';
+    
+    // Set price from first variant
+    if (priceField && product.variants && product.variants.length > 0) {
+        priceField.value = product.variants[0].price || '';
+    }
+    
+    // Default to keeping current image
+    this.toggleImageGeneration(false);
+};
+
 // Utility functions for product management
 StoreCreator.prototype.stripHtml = function(html) {
     const tmp = document.createElement('div');
@@ -887,6 +1044,142 @@ StoreCreator.prototype.escapeHtml = function(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+};
+
+// Smart Edit Functions
+function useSmartEditExample(prompt) {
+    const smartEditInput = document.getElementById('smartEditPrompt');
+    smartEditInput.value = prompt;
+    smartEditInput.focus();
+    
+    // Trigger auto-resize
+    smartEditInput.style.height = 'auto';
+    smartEditInput.style.height = smartEditInput.scrollHeight + 'px';
+    
+    // Scroll to smart edit form
+    document.getElementById('smartEditForm').scrollIntoView({ behavior: 'smooth' });
+}
+
+StoreCreator.prototype.initSmartEdit = function() {
+    this.smartEditForm = document.getElementById('smartEditForm');
+    this.smartEditBtn = document.getElementById('smartEditBtn');
+    this.smartEditPrompt = document.getElementById('smartEditPrompt');
+    this.smartEditProgress = document.getElementById('smartEditProgress');
+    this.smartEditProgressFill = document.getElementById('smartEditProgressFill');
+    this.smartEditProgressText = document.getElementById('smartEditProgressText');
+
+    if (this.smartEditForm) {
+        this.smartEditForm.addEventListener('submit', (e) => this.handleSmartEdit(e));
+    }
+
+    // Auto-resize for smart edit textarea
+    if (this.smartEditPrompt) {
+        this.smartEditPrompt.addEventListener('input', this.autoResize);
+    }
+};
+
+StoreCreator.prototype.handleSmartEdit = async function(e) {
+    e.preventDefault();
+    
+    const prompt = this.smartEditPrompt.value.trim();
+    if (!prompt) {
+        this.showToast('Please enter what you want to change', 'error');
+        return;
+    }
+
+    try {
+        // Show progress
+        this.smartEditProgress.style.display = 'block';
+        this.smartEditBtn.disabled = true;
+        this.smartEditProgressText.textContent = 'Finding product to edit...';
+        this.smartEditProgressFill.style.width = '10%';
+
+        // Start smart edit
+        const response = await fetch('/api/smart-edit', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ prompt })
+        });
+
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to start smart edit');
+        }
+
+        // Monitor progress
+        this.monitorSmartEditProgress(data.job_id);
+
+    } catch (error) {
+        console.error('Smart edit error:', error);
+        this.showToast(`Smart edit failed: ${error.message}`, 'error');
+        this.smartEditProgress.style.display = 'none';
+        this.smartEditBtn.disabled = false;
+    }
+};
+
+StoreCreator.prototype.monitorSmartEditProgress = async function(jobId) {
+    const maxAttempts = 60; // 60 seconds max
+    let attempts = 0;
+
+    const checkProgress = async () => {
+        try {
+            const response = await fetch(`/api/job-status/${jobId}`);
+            const data = await response.json();
+            
+            // Update progress
+            this.smartEditProgressFill.style.width = `${data.progress || 0}%`;
+            
+            if (data.status === 'completed') {
+                this.smartEditProgressText.textContent = 'Edit completed successfully!';
+                this.smartEditProgress.style.display = 'none';
+                this.smartEditBtn.disabled = false;
+                
+                this.showToast(data.result?.message || 'Product updated successfully!', 'success');
+                
+                // Clear the form
+                this.smartEditPrompt.value = '';
+                
+                // Refresh products if they're loaded
+                if (this.productsContainer.style.display !== 'none') {
+                    this.loadProducts();
+                }
+                
+                return;
+            } else if (data.status === 'failed') {
+                throw new Error(data.error || 'Smart edit failed');
+            } else if (data.status === 'running') {
+                // Update progress text based on progress
+                if (data.progress < 30) {
+                    this.smartEditProgressText.textContent = 'Identifying product...';
+                } else if (data.progress < 60) {
+                    this.smartEditProgressText.textContent = 'Analyzing changes...';
+                } else if (data.progress < 90) {
+                    this.smartEditProgressText.textContent = 'Updating product...';
+                } else {
+                    this.smartEditProgressText.textContent = 'Generating new images...';
+                }
+            }
+            
+            // Continue monitoring if still running
+            if (data.status === 'running' && attempts < maxAttempts) {
+                attempts++;
+                setTimeout(checkProgress, 1000);
+            } else if (attempts >= maxAttempts) {
+                throw new Error('Smart edit timed out');
+            }
+            
+        } catch (error) {
+            console.error('Error checking smart edit progress:', error);
+            this.showToast(`Smart edit error: ${error.message}`, 'error');
+            this.smartEditProgress.style.display = 'none';
+            this.smartEditBtn.disabled = false;
+        }
+    };
+
+    checkProgress();
 };
 
 // Initialize when DOM is loaded

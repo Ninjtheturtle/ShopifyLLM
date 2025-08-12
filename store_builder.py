@@ -960,7 +960,7 @@ class CompleteShopifyStoreCreator:
         workout_products = [
             {
                 'name': 'Premium Workout T-Shirt',
-                'price': 24.99,
+                'price': 26.49,  # Updated to match market research
                 'description': 'Moisture-wicking athletic shirt designed for high-intensity workouts. Features four-way stretch fabric and breathable mesh panels for maximum comfort.',
                 'features': [
                     'Moisture-wicking fabric',
@@ -974,7 +974,7 @@ class CompleteShopifyStoreCreator:
             },
             {
                 'name': 'Athletic Leggings',
-                'price': 39.99,
+                'price': 22.00,  # Updated to match market research
                 'description': 'High-performance leggings with compression fit and side pockets. Perfect for yoga, running, or weightlifting.',
                 'features': [
                     'Compression fit',
@@ -988,7 +988,7 @@ class CompleteShopifyStoreCreator:
             },
             {
                 'name': 'Training Shorts',
-                'price': 19.99,
+                'price': 24.49,  # Updated to match market research
                 'description': 'Lightweight training shorts with built-in compression liner. Ideal for running and cross-training.',
                 'features': [
                     'Built-in compression liner',
@@ -1002,7 +1002,7 @@ class CompleteShopifyStoreCreator:
             },
             {
                 'name': 'Performance Tank Top',
-                'price': 18.49,
+                'price': 27.49,  # Updated to match market research
                 'description': 'Sleeveless performance top with racerback design. Features antimicrobial treatment and ultra-soft fabric.',
                 'features': [
                     'Racerback design',

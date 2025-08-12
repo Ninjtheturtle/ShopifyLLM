@@ -618,7 +618,7 @@ StoreCreator.prototype.loadProducts = async function() {
         `;
         this.productsContainer.style.display = 'block';
 
-        const response = await fetch('/api/products');
+        const response = await fetch('/api/products?_=' + Date.now());
         const data = await response.json();
 
         if (!response.ok) {

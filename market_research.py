@@ -541,18 +541,29 @@ class MarketResearcher:
         
         # Update product with research
         enhanced_product = product.copy()
+        
+        # PRESERVE ORIGINAL PRICE - only enhance description and features
+        original_price = product.get('price')
+        if original_price and original_price > 0:
+            # Keep the original hardcoded price
+            final_price = original_price
+            print(f"   💡 Enhanced {product['name']}: Using hardcoded price ${final_price:.2f} (RAG suggested ${research['suggested_price']:.2f})")
+        else:
+            # Use RAG price if no original price was set
+            final_price = research['suggested_price']
+            print(f"   💡 Enhanced {product['name']}: Using RAG price ${final_price:.2f}")
+        
         enhanced_product.update({
-            'price': research['suggested_price'],
+            'price': final_price,
             'description': research['enhanced_description'],
             'key_features': research.get('key_features', []),
             'market_research': {
                 'price_range': research.get('price_range'),
                 'market_position': research.get('market_position', 'competitive'),
                 'competitors': research.get('competitors', []),
-                'research_notes': research.get('market_notes', '')
+                'research_notes': research.get('market_notes', ''),
+                'rag_suggested_price': research['suggested_price']  # Keep RAG suggestion for reference
             }
         })
-        
-        print(f"   💡 Enhanced {product['name']}: ${product.get('price', 0):.2f} → ${research['suggested_price']:.2f}")
         
         return enhanced_product

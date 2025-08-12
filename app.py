@@ -281,11 +281,18 @@ def list_products():
         # Fetch products from Shopify - these are the ACTUAL current prices
         products = creator._get_all_products()
         
-        return jsonify({
+        response = jsonify({
             'success': True,
             'products': products,
             'count': len(products)
         })
+        
+        # Add cache-control headers to prevent caching
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        return response
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -18,6 +18,7 @@ class MarketResearcher:
         self.competitor_data = {}
         self.product_features = {}
     
+
     def _normalize_price(self, price: float) -> float:
         """Normalize price to end with .99, .49, or .00"""
         # Convert to integer part and decimal part
@@ -357,7 +358,7 @@ class MarketResearcher:
         
         # Product category intelligence - ordered by specificity
         categories = {
-            'athletic_wear': ['workout', 'athletic', 'legging', 'tank top', 't-shirt', 'shorts', 'sportswear', 'activewear', 'training', 'performance'],
+            'athletic wear': ['workout', 'athletic', 'legging', 'tank top', 't-shirt', 'shorts', 'sportswear', 'activewear', 'training', 'performance'],
             'household': ['toilet paper', 'tissue', 'paper towel', 'napkin', 'soap', 'detergent', 'cleaner', 'sponge', 'towel'],
             'office': ['pen', 'pencil', 'paper', 'folder', 'binder', 'stapler', 'calculator', 'desk', 'tissue', 'napkin'],
             'electronics': ['phone', 'laptop', 'tablet', 'headphone', 'speaker', 'charger', 'cable', 'mouse', 'keyboard'],
@@ -385,7 +386,7 @@ class MarketResearcher:
         
         # Category-specific pricing ranges (realistic market data)
         pricing_data = {
-            'athletic_wear': {'min': 15, 'max': 45, 'avg': 25},  # Realistic athletic clothing prices
+            'athletic wear': {'min': 15, 'max': 45, 'avg': 25},  # Realistic athletic clothing prices
             'electronics': {'min': 15, 'max': 300, 'avg': 75},
             'fitness_equipment': {'min': 20, 'max': 200, 'avg': 60},
             'kitchen': {'min': 10, 'max': 150, 'avg': 35},
@@ -408,7 +409,7 @@ class MarketResearcher:
         price_info = pricing_data.get(detected_category, pricing_data['general'])
         
         # Use average price with minimal realistic variance for better pricing
-        if detected_category == 'athletic_wear':
+        if detected_category == 'athletic wear':
             # Extra control for athletic wear to keep prices realistic
             suggested_price = price_info['avg'] + random.uniform(-3, 3)
             suggested_price = max(price_info['min'], min(price_info['max'], suggested_price))
@@ -420,7 +421,7 @@ class MarketResearcher:
         
         # Generate features based on category
         feature_templates = {
-            'athletic_wear': ['Moisture-wicking fabric', 'Four-way stretch', 'Quick-dry technology', 'Breathable design'],
+            'athletic wear': ['Moisture-wicking fabric', 'Four-way stretch', 'Quick-dry technology', 'Breathable design'],
             'electronics': ['High-quality components', 'Durable construction', 'Energy efficient', 'User-friendly interface'],
             'fitness_equipment': ['Professional grade', 'Ergonomic design', 'Non-slip grip', 'Adjustable settings'],
             'kitchen': ['Food-safe materials', 'Easy to clean', 'Heat resistant', 'Precision crafted'],
@@ -445,7 +446,8 @@ class MarketResearcher:
         
         # Create detailed description
         if len(product_features) >= 2:
-            description = f"{product_name} featuring {product_features[0].lower()} and {product_features[1].lower()}. Designed for optimal performance and durability, this {detected_category} item offers excellent value. Perfect for both beginners and professionals seeking reliable equipment."
+            # Create product-specific descriptions instead of generic ones
+            description = self._create_tailored_description(product_name, detected_category, product_features)
         else:
             description = f"Quality {product_name.lower()} designed for reliable performance and lasting durability."
         
@@ -458,6 +460,67 @@ class MarketResearcher:
             'market_position': 'competitive',
             'market_notes': f'Competitively priced in the {detected_category} market segment based on feature set and quality.'
         }
+    
+    def _create_tailored_description(self, product_name: str, category: str, features: List[str]) -> str:
+        """Create product-specific descriptions instead of generic ones"""
+        name_lower = product_name.lower()
+        feature1 = features[0].lower() if len(features) > 0 else "premium materials"
+        feature2 = features[1].lower() if len(features) > 1 else "quality construction"
+        
+        # Athletic wear specific descriptions
+        if category == 'athletic wear':
+            if 'shirt' in name_lower or 't-shirt' in name_lower:
+                return f"{product_name} engineered with {feature1} for maximum performance during intense workouts. The {feature2} ensures you stay comfortable from warm-up to cool-down."
+            elif 'tank' in name_lower:
+                return f"{product_name} crafted for high-intensity training. The {feature1} and {feature2} work together to regulate temperature and enhance mobility."
+            elif 'legging' in name_lower or 'pant' in name_lower:
+                return f"{product_name} designed for athletes who demand both style and function. Features {feature1} with {feature2} for unrestricted movement during any activity."
+            elif 'shorts' in name_lower:
+                return f"{product_name} built for training and competition. Combines {feature1} with {feature2} to keep you focused on performance, not your gear."
+            elif 'top' in name_lower:
+                return f"{product_name} designed for peak performance with {feature1} and {feature2}. Move with confidence through every workout."
+            else:
+                return f"{product_name} engineered for athletes who settle for nothing less than peak performance. Advanced {feature1} meets {feature2} for ultimate workout confidence."
+        
+        # Electronics specific descriptions  
+        elif category == 'electronics':
+            if 'phone' in name_lower and 'case' in name_lower:
+                return f"{product_name} engineered to protect your device with {feature1} while maintaining {feature2}. Built for everyday use and unexpected drops."
+            elif 'headphone' in name_lower or 'earbud' in name_lower:
+                return f"{product_name} delivers exceptional audio experience with {feature1} and {feature2}. Immerse yourself in crystal-clear sound all day long."
+            elif 'charger' in name_lower or 'cable' in name_lower:
+                return f"{product_name} provides reliable power delivery with {feature1} and {feature2}. Keep your devices charged and ready for anything."
+            else:
+                return f"{product_name} combines cutting-edge {feature1} with {feature2} to deliver superior performance and user experience."
+        
+        # Kitchen specific descriptions
+        elif category == 'kitchen':
+            if 'knife' in name_lower:
+                return f"{product_name} forged with {feature1} for precise cutting and {feature2} for lasting sharpness. Essential for every kitchen."
+            elif 'pan' in name_lower or 'pot' in name_lower:
+                return f"{product_name} engineered with {feature1} for even heat distribution and {feature2} for effortless cooking and cleanup."
+            else:
+                return f"{product_name} designed for culinary excellence with {feature1} and {feature2}. Elevate your cooking experience."
+        
+        # Fitness equipment specific descriptions
+        elif category == 'fitness_equipment':
+            return f"{product_name} engineered for serious training with {feature1} and {feature2}. Build strength, endurance, and confidence with every rep."
+        
+        # Beauty specific descriptions
+        elif category == 'beauty':
+            return f"{product_name} formulated with {feature1} and {feature2} to enhance your natural beauty. Experience visible results with daily use."
+        
+        # Home decor specific descriptions
+        elif category == 'home':
+            return f"{product_name} crafted with {feature1} and {feature2} to transform your living space. Style meets functionality in every detail."
+        
+        # Tool specific descriptions
+        elif category == 'tools':
+            return f"{product_name} built with {feature1} and {feature2} for professional results. The right tool makes all the difference."
+        
+        # Default for other categories - still avoid generic language
+        else:
+            return f"{product_name} expertly crafted with {feature1} and {feature2}. Designed to exceed expectations in both quality and performance."
     
     def _get_product_specific_features(self, product_name: str, category: str) -> List[str]:
         """Generate realistic, product-specific features"""

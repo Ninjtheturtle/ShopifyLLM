@@ -1,0 +1,145 @@
+<!-- 🚀 CORRECTED Shopify theme.liquid code -->
+<!-- Add this before closing </body> tag -->
+
+{%- if settings.predictive_search_enabled -%}
+  <script src="{{ 'predictive-search.js' | asset_url }}" defer="defer"></script>
+{%- endif -%}
+
+{%- if settings.cart_type == 'drawer' -%}
+  <script src="{{ 'cart-drawer.js' | asset_url }}" defer="defer"></script>
+{%- endif -%}
+</body>
+
+<!-- 🚀 A/B Testing Script Injection - CORRECTED VERSION -->
+{% if product %}
+  <script>
+    // Configuration - CORRECTED ngrok URL
+    window.AB_TESTING_CONFIG = {
+      apiUrl: "https://6af91629b07f.ngrok-free.app", // ✅ CORRECT URL
+      productId: "{{ product.id }}",
+      productHandle: "{{ product.handle }}"
+    };
+  </script>
+  
+  <script>
+    // Load A/B testing script with proper ngrok headers
+    (function() {
+      const script = document.createElement('script');
+      script.src = window.AB_TESTING_CONFIG.apiUrl + '/static/js/ab-testing-client-debug.js';
+      script.defer = true;
+      
+      // Create a custom fetch for script loading with ngrok headers
+      fetch(script.src, {
+        method: 'GET',
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        }
+      })
+      .then(response => response.text())
+      .then(scriptContent => {
+        // Create and execute script
+        const execScript = document.createElement('script');
+        execScript.textContent = scriptContent;
+        document.head.appendChild(execScript);
+        
+        console.log("✅ A/B Testing script loaded successfully");
+        initializeABTesting();
+      })
+      .catch(error => {
+        console.error("❌ Failed to load A/B Testing script:", error);
+        console.error("Check if ngrok is running and URL is correct");
+      });
+    })();
+
+    function initializeABTesting() {
+      document.addEventListener('DOMContentLoaded', function() {
+        if (typeof ShopifyABTestingClient === 'undefined') {
+          console.warn("⚠️ A/B Testing client not loaded");
+          return;
+        }
+
+        const productId = window.AB_TESTING_CONFIG.productId;
+        const apiUrl = window.AB_TESTING_CONFIG.apiUrl;
+        
+        console.log("🔧 Initializing A/B testing for product:", productId);
+        console.log("🔧 Using API URL:", apiUrl);
+
+        // Initialize with correct URL and ngrok headers
+        const ab = new ShopifyABTestingClient(apiUrl, {
+          headers: {
+            'ngrok-skip-browser-warning': 'true'
+          }
+        });
+
+        // Initialize experiment assignment for this product
+        ab.initializeExperiments({ productId: productId }).then(() => {
+          console.log("✅ Experiment initialized for product", productId);
+          console.log("🎯 Current variant:", ab.currentVariant);
+          console.log("🧪 Experiment ID:", ab.currentExperimentId);
+
+          // Save variant globally for cart property injection
+          window._abVariantForCart = ab.currentExperimentId 
+            ? (ab.currentExperimentId + ':' + ab.currentVariant) 
+            : '';
+            
+          console.log("💾 Saved variant for cart:", window._abVariantForCart);
+        }).catch(error => {
+          console.error("❌ Failed to initialize experiment:", error);
+        });
+
+        // Enhanced Add to Cart tracking with multiple selectors
+        document.addEventListener('click', function(e) {
+          // Try multiple selectors for different Shopify themes
+          const atcBtn = e.target.closest('button[name="add"]') || 
+                        e.target.closest('.btn-product-add') ||
+                        e.target.closest('[data-add-to-cart]') ||
+                        e.target.closest('.product-form__cart-submit') ||
+                        e.target.closest('.add-to-cart') ||
+                        e.target.closest('input[name="add"]') ||
+                        e.target.closest('[type="submit"]');
+                        
+          if (!atcBtn) return;
+
+          console.log("🛒 Add to cart button clicked!", atcBtn);
+
+          if (ab.currentExperimentId && ab.currentVariant) {
+            console.log("📊 Tracking cart event...");
+            ab.trackEvent({
+              type: 'add_to_cart', // Use consistent event type
+              product_id: productId,
+              experiment_id: ab.currentExperimentId,
+              variant: ab.currentVariant
+            });
+            console.log("✅ ATC event tracked for variant:", ab.currentVariant);
+          } else {
+            console.warn("⚠️ No experiment/variant found for cart tracking");
+          }
+        }, true);
+
+        // Enhanced form submission tracking
+        document.addEventListener('submit', function(e) {
+          const form = e.target;
+          if (!form.matches('form[action*="/cart/add"]') && 
+              !form.matches('.product-form') &&
+              !form.matches('[data-type="add-to-cart-form"]')) return;
+          
+          console.log("📝 Form submission detected:", form);
+          
+          if (!window._abVariantForCart) {
+            console.warn("⚠️ No variant info to inject into cart");
+            return;
+          }
+
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'properties[_ab_variant]';
+          input.value = window._abVariantForCart;
+          form.appendChild(input);
+
+          console.log("📦 Injected cart property:", window._abVariantForCart);
+        }, true);
+      });
+    }
+  </script>
+{% endif %}
+</html>
